@@ -1843,6 +1843,14 @@ function createShapeFromMetadata(shapeMetadata) {
             // ノードタイプに応じて図形を作成
             switch (shapeMetadata.type) {
                 case 'RECTANGLE':
+                    // 画像ノード判定: fillsにIMAGEタイプが含まれているか
+                    const hasImageFill = Array.isArray(shapeMetadata.fills) && shapeMetadata.fills.some((fill) => fill.type === 'IMAGE');
+                    // 画像ファイル名と一致するだけの長方形ノードをスキップ
+                    if (!hasImageFill && shapeMetadata.imageFileName) {
+                        // 画像ファイル名が指定されているが、fillsにIMAGEがない場合はスキップ
+                        console.log(`Skipping rectangle node named "${shapeMetadata.name}" because it matches an image file name but has no IMAGE fill.`);
+                        return null;
+                    }
                     shape = figma.createRectangle();
                     console.log('Created rectangle');
                     break;
