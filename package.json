@@ -1,0 +1,19 @@
+{
+  "name": "fig",
+  "version": "1.0.0",
+  "description": "このリポジトリは、Figmaプラグイン開発のためのシンプルなテンプレートです。",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "webpack": "^5.0.0",
+    "ts-loader": "^9.0.0",
+    "@figma/plugin-typings": "^1.65.0"
+  }
+}

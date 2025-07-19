@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>円を作成</title>
+  <style>
+    body { font-family: sans-serif; margin: 16px; }
+    #status { margin-top: 8px; color: #333; }
+    #error { color: red; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <button id="create-circle">円を作成</button>
+  <div id="status"></div>
+  <div id="error"></div>
+  <script>
+    const btn = document.getElementById('create-circle');
+    const statusDiv = document.getElementById('status');
+    const errorDiv = document.getElementById('error');
+    btn.onclick = () => {
+      parent.postMessage({ pluginMessage: { type: 'create-circle' } }, '*');
+    };
+    window.onmessage = (event) => {
+      const msg = event.data.pluginMessage;
+      if (!msg) return;
+      if (msg.type === 'error') {
+        errorDiv.textContent = `エラー: ${msg.message}`;
+      }
+      if (msg.type === 'status') {
+        statusDiv.textContent = msg.message;
+      }
+    };
+  </script>
+</body>
+</html> 
