@@ -202,6 +202,112 @@ async function exportToZip(exportType: string) {
   const results = await Promise.all(
     nodes.map(async (node) => {
       try {
+        console.log(`Processing node: ${node.name} (${node.type})`);
+        
+        // グループノードの場合は特別処理
+        if (node.type === 'GROUP' as any) {
+          console.log(`Processing GROUP node: ${node.name} with ${(node as any).children?.length || 0} children`);
+          const groupNode = node as GroupNode;
+          
+          const nodeMetadata: any = {
+            id: groupNode.id,
+            name: groupNode.name,
+            type: 'GROUP',
+            x: groupNode.x,
+            y: groupNode.y,
+            width: groupNode.width,
+            height: groupNode.height,
+            visible: groupNode.visible,
+            locked: groupNode.locked,
+            folderType: null,
+            fileExtension: null,
+            hasImageFile: false
+          };
+          
+          // グループの基本プロパティを追加
+          try {
+            if ('rotation' in groupNode) nodeMetadata.rotation = groupNode.rotation;
+          } catch (e) {}
+          
+          try {
+            if ('layoutAlign' in groupNode) nodeMetadata.layoutAlign = groupNode.layoutAlign;
+          } catch (e) {}
+          
+          try {
+            if ('layoutGrow' in groupNode) nodeMetadata.layoutGrow = groupNode.layoutGrow;
+          } catch (e) {}
+          
+          try {
+            if ('effects' in groupNode) nodeMetadata.effects = groupNode.effects;
+          } catch (e) {}
+          
+          try {
+            if ('blendMode' in groupNode) nodeMetadata.blendMode = groupNode.blendMode;
+          } catch (e) {}
+          
+          try {
+            if ('opacity' in groupNode) nodeMetadata.opacity = groupNode.opacity;
+          } catch (e) {}
+          
+          // グループ構造の情報を追加
+          nodeMetadata.groupStructure = {
+            id: groupNode.id,
+            name: groupNode.name,
+            children: groupNode.children?.map((child, index) => {
+              console.log(`Group child ${index}: ${child.name} (${child.type}) at (${child.x - groupNode.x}, ${child.y - groupNode.y})`);
+              return {
+                id: child.id,
+                name: child.name,
+                type: child.type,
+                index: index,
+                x: child.x - groupNode.x, // グループ内での相対位置
+                y: child.y - groupNode.y,
+                width: child.width,
+                height: child.height,
+                visible: child.visible,
+                locked: child.locked,
+                rotation: 'rotation' in child ? child.rotation : null,
+                opacity: 'opacity' in child ? child.opacity : null,
+                fills: 'fills' in child && child.fills ? child.fills : null,
+                strokes: 'strokes' in child && child.strokes ? child.strokes : null,
+                effects: 'effects' in child && child.effects ? child.effects : null,
+                cornerRadius: child.type === 'RECTANGLE' ? (child as RectangleNode).cornerRadius : null,
+                strokeWeight: 'strokeWeight' in child ? child.strokeWeight : null,
+                strokeAlign: 'strokeAlign' in child ? child.strokeAlign : null,
+                strokeCap: 'strokeCap' in child ? child.strokeCap : null,
+                strokeJoin: 'strokeJoin' in child ? child.strokeJoin : null,
+                dashPattern: 'dashPattern' in child ? child.dashPattern : null,
+                // テキストノードの場合はテキスト情報も保存
+                textContent: child.type === 'TEXT' ? (child as TextNode).characters : null,
+                fontName: child.type === 'TEXT' ? (child as TextNode).fontName : null,
+                fontSize: child.type === 'TEXT' ? (child as TextNode).fontSize : null,
+                lineHeight: child.type === 'TEXT' ? (child as TextNode).lineHeight : null,
+                letterSpacing: child.type === 'TEXT' ? (child as TextNode).letterSpacing : null,
+                textAlignHorizontal: child.type === 'TEXT' ? (child as TextNode).textAlignHorizontal : null,
+                textAlignVertical: child.type === 'TEXT' ? (child as TextNode).textAlignVertical : null,
+                textAutoResize: child.type === 'TEXT' ? (child as TextNode).textAutoResize : null,
+                textCase: child.type === 'TEXT' ? (child as TextNode).textCase : null,
+                textDecoration: child.type === 'TEXT' ? (child as TextNode).textDecoration : null,
+                paragraphIndent: child.type === 'TEXT' ? (child as TextNode).paragraphIndent : null,
+                paragraphSpacing: child.type === 'TEXT' ? (child as TextNode).paragraphSpacing : null,
+                textFills: child.type === 'TEXT' && 'fills' in child && child.fills ? child.fills : null,
+                textStrokes: child.type === 'TEXT' && 'strokes' in child && child.strokes ? child.strokes : null,
+                textEffects: child.type === 'TEXT' && 'effects' in child && child.effects ? child.effects : null,
+                // クリッピングマスク情報
+                clipsContent: 'clipsContent' in child ? child.clipsContent : null
+              };
+            }) || []
+          };
+          
+          console.log(`Group structure saved for: ${groupNode.name}`);
+          
+          return {
+            name: groupNode.name || 'unnamed',
+            metadata: nodeMetadata,
+            bytes: null
+          };
+        }
+        
         // シンボルやコンポーネントインスタンスの場合は特別処理
         const nodeType = node.type as string;
         if (nodeType === 'INSTANCE' || nodeType === 'COMPONENT') {
@@ -482,56 +588,7 @@ async function exportToZip(exportType: string) {
           nodeMetadata.componentIndex = node.parent.children?.indexOf(node) || 0;
         }
         
-        // グループノードの場合、グループ構造の情報を追加
-        if (node.type === 'GROUP') {
-          const groupNode = node as GroupNode;
-          nodeMetadata.groupStructure = {
-            id: groupNode.id,
-            name: groupNode.name,
-            children: groupNode.children?.map((child, index) => ({
-              id: child.id,
-              name: child.name,
-              type: child.type,
-              index: index,
-              x: child.x - groupNode.x, // グループ内での相対位置
-              y: child.y - groupNode.y,
-              width: child.width,
-              height: child.height,
-              visible: child.visible,
-              locked: child.locked,
-              rotation: 'rotation' in child ? child.rotation : null,
-              opacity: 'opacity' in child ? child.opacity : null,
-              fills: 'fills' in child && child.fills ? child.fills : null,
-              strokes: 'strokes' in child && child.strokes ? child.strokes : null,
-              effects: 'effects' in child && child.effects ? child.effects : null,
-              cornerRadius: child.type === 'RECTANGLE' ? (child as RectangleNode).cornerRadius : null,
-              strokeWeight: 'strokeWeight' in child ? child.strokeWeight : null,
-              strokeAlign: 'strokeAlign' in child ? child.strokeAlign : null,
-              strokeCap: 'strokeCap' in child ? child.strokeCap : null,
-              strokeJoin: 'strokeJoin' in child ? child.strokeJoin : null,
-              dashPattern: 'dashPattern' in child ? child.dashPattern : null,
-              // テキストノードの場合はテキスト情報も保存
-              textContent: child.type === 'TEXT' ? (child as TextNode).characters : null,
-              fontName: child.type === 'TEXT' ? (child as TextNode).fontName : null,
-              fontSize: child.type === 'TEXT' ? (child as TextNode).fontSize : null,
-              lineHeight: child.type === 'TEXT' ? (child as TextNode).lineHeight : null,
-              letterSpacing: child.type === 'TEXT' ? (child as TextNode).letterSpacing : null,
-              textAlignHorizontal: child.type === 'TEXT' ? (child as TextNode).textAlignHorizontal : null,
-              textAlignVertical: child.type === 'TEXT' ? (child as TextNode).textAlignVertical : null,
-              textAutoResize: child.type === 'TEXT' ? (child as TextNode).textAutoResize : null,
-              textCase: child.type === 'TEXT' ? (child as TextNode).textCase : null,
-              textDecoration: child.type === 'TEXT' ? (child as TextNode).textDecoration : null,
-              paragraphIndent: child.type === 'TEXT' ? (child as TextNode).paragraphIndent : null,
-              paragraphSpacing: child.type === 'TEXT' ? (child as TextNode).paragraphSpacing : null,
-              textFills: child.type === 'TEXT' && 'fills' in child && child.fills ? child.fills : null,
-              textStrokes: child.type === 'TEXT' && 'strokes' in child && child.strokes ? child.strokes : null,
-              textEffects: child.type === 'TEXT' && 'effects' in child && child.effects ? child.effects : null,
-              // クリッピングマスク情報
-              clipsContent: 'clipsContent' in child ? child.clipsContent : null
-            })) || []
-          };
-        }
-        
+        // グループノードの場合は特別処理（既に上で処理済み）
         // フレームノードの場合、フレーム構造の情報を追加
         if (node.type === 'FRAME') {
           const frameNode = node as FrameNode;
@@ -582,83 +639,20 @@ async function exportToZip(exportType: string) {
           };
         }
         
-        // コンポーネントノードの場合、コンポーネント構造の情報を追加
-        if (node.type === 'COMPONENT') {
-          const componentNode = node as ComponentNode;
-          nodeMetadata.componentStructure = {
-            id: componentNode.id,
-            name: componentNode.name,
-            children: componentNode.children?.map((child, index) => ({
-              id: child.id,
-              name: child.name,
-              type: child.type,
-              index: index,
-              x: child.x - componentNode.x, // コンポーネント内での相対位置
-              y: child.y - componentNode.y
-            })) || []
-          };
-        }
-        
-        // テキストノードの場合、フォント情報を追加
-        if (node.type === 'TEXT') {
-          const textNode = node as TextNode;
-          nodeMetadata.textContent = textNode.characters;
-          nodeMetadata.fontName = textNode.fontName;
-          nodeMetadata.fontSize = textNode.fontSize;
-          nodeMetadata.lineHeight = textNode.lineHeight;
-          nodeMetadata.letterSpacing = textNode.letterSpacing;
-          nodeMetadata.textAlignHorizontal = textNode.textAlignHorizontal;
-          nodeMetadata.textAlignVertical = textNode.textAlignVertical;
-          nodeMetadata.textAutoResize = textNode.textAutoResize;
-          nodeMetadata.textCase = textNode.textCase;
-          nodeMetadata.textDecoration = textNode.textDecoration;
-          nodeMetadata.paragraphIndent = textNode.paragraphIndent;
-          nodeMetadata.paragraphSpacing = textNode.paragraphSpacing;
-          
-          // フォントスタイルの詳細情報
-          if (textNode.fontName && typeof textNode.fontName === 'object') {
-            nodeMetadata.fontFamily = textNode.fontName.family;
-            nodeMetadata.fontStyle = textNode.fontName.style;
-          }
-          
-          // 塗りつぶし情報（テキストの色）
-          if ('fills' in textNode && textNode.fills && Array.isArray(textNode.fills)) {
-            nodeMetadata.textFills = textNode.fills.map(fill => ({
-              type: fill.type,
-              visible: fill.visible,
-              opacity: fill.opacity,
-              color: fill.type === 'SOLID' ? fill.color : null
-            }));
-          }
-          
-          // ストローク情報
-          if ('strokes' in textNode && textNode.strokes && Array.isArray(textNode.strokes)) {
-            nodeMetadata.textStrokes = textNode.strokes.map(stroke => ({
-              type: stroke.type,
-              visible: stroke.visible,
-              opacity: stroke.opacity,
-              color: stroke.type === 'SOLID' ? stroke.color : null,
-              weight: stroke.weight
-            }));
-          }
-          
-          // エフェクト情報
-          if ('effects' in textNode && textNode.effects && Array.isArray(textNode.effects)) {
-            nodeMetadata.textEffects = textNode.effects.map(effect => ({
-              type: effect.type,
-              visible: effect.visible,
-              radius: effect.radius,
-              color: effect.color,
-              offset: effect.offset,
-              spread: effect.spread
-            }));
-          }
-        }
-        
         // ノードタイプに応じてフォルダとパスを決定
         let folderType: string | null = 'img';
         let fileExtension: string | null = 'png';
         let bytes: Uint8Array | null = null;
+        
+        // グループノードの場合は特別処理済みなのでスキップ
+        if (node.type === 'GROUP' as any) {
+          // グループは既に特別処理済み
+          return {
+            name: node.name || 'unnamed',
+            metadata: nodeMetadata,
+            bytes: null
+          };
+        }
         
         // フレームの場合、画像を含むかどうかをチェック
         if (node.type === 'FRAME') {
@@ -681,28 +675,7 @@ async function exportToZip(exportType: string) {
           bytes = null;
           folderType = null;
           fileExtension = null;
-        } else if (node.type === 'GROUP') {
-          // グループの場合、画像を含むかどうかをチェック
-          const hasImage = hasImageInGroup(node);
-          const imageNodes = getImageNodesInGroup(node);
-          
-          nodeMetadata.hasImage = hasImage;
-          nodeMetadata.imageNodeCount = imageNodes.length;
-          nodeMetadata.imageNodes = imageNodes.map(imgNode => ({
-            id: imgNode.id,
-            name: imgNode.name,
-            type: imgNode.type,
-            // 画像ファイルのパスを追加（実際のノード名を使用）
-            imagePath: `img/${imgNode.name || 'unnamed'}.png`,
-            hasImageFile: true,
-            imageFileName: `${imgNode.name || 'unnamed'}.png`
-          }));
-          
-          // グループは写真を出力しない
-          bytes = null;
-          folderType = null;
-          fileExtension = null;
-                } else {
+        } else {
           // シンボルやコンポーネントインスタンスの処理
           const nodeType = node.type as string;
           if (nodeType === 'INSTANCE' || nodeType === 'COMPONENT') {
@@ -723,14 +696,38 @@ async function exportToZip(exportType: string) {
               } : null;
             }
           } else {
-          // 画像フィルを持つノードを画像として識別
-          if ('fills' in node && node.fills && Array.isArray(node.fills)) {
-            const imageFills = node.fills.filter(fill => fill.type === 'IMAGE' && fill.visible !== false);
-            if (imageFills.length > 0) {
+            // 画像フィルを持つノードを画像として識別
+            if ('fills' in node && node.fills && Array.isArray(node.fills)) {
+              const imageFills = node.fills.filter(fill => fill.type === 'IMAGE' && fill.visible !== false);
+              if (imageFills.length > 0) {
+                folderType = 'img';
+                fileExtension = 'png';
+                nodeMetadata.hasImageFill = true;
+                nodeMetadata.imageFillCount = imageFills.length;
+                // 画像データを抽出（シンボルでない場合のみ）
+                try {
+                  if ('exportAsync' in node) {
+                    bytes = await node.exportAsync(exportSettings);
+                  }
+                } catch (error) {
+                  const errorMessage = error instanceof Error ? error.message : String(error);
+                  console.warn(`Failed to export node ${node.name}: ${errorMessage}`);
+                  bytes = null;
+                }
+                // 画像フィルの情報をメタデータに追加
+                nodeMetadata.imageFills = imageFills.map(fill => ({
+                  type: fill.type,
+                  visible: fill.visible,
+                  opacity: fill.opacity
+                }));
+              }
+            }
+            
+            // 画像ハッシュを持つノードを画像として識別
+            if ('imageHash' in node && node.imageHash) {
               folderType = 'img';
               fileExtension = 'png';
-              nodeMetadata.hasImageFill = true;
-              nodeMetadata.imageFillCount = imageFills.length;
+              nodeMetadata.imageHash = node.imageHash;
               // 画像データを抽出（シンボルでない場合のみ）
               try {
                 if ('exportAsync' in node) {
@@ -741,32 +738,8 @@ async function exportToZip(exportType: string) {
                 console.warn(`Failed to export node ${node.name}: ${errorMessage}`);
                 bytes = null;
               }
-              // 画像フィルの情報をメタデータに追加
-              nodeMetadata.imageFills = imageFills.map(fill => ({
-                type: fill.type,
-                visible: fill.visible,
-                opacity: fill.opacity
-              }));
             }
           }
-          
-          // 画像ハッシュを持つノードを画像として識別
-          if ('imageHash' in node && node.imageHash) {
-            folderType = 'img';
-            fileExtension = 'png';
-            nodeMetadata.imageHash = node.imageHash;
-            // 画像データを抽出（シンボルでない場合のみ）
-            try {
-              if ('exportAsync' in node) {
-                bytes = await node.exportAsync(exportSettings);
-              }
-            } catch (error) {
-              const errorMessage = error instanceof Error ? error.message : String(error);
-              console.warn(`Failed to export node ${node.name}: ${errorMessage}`);
-              bytes = null;
-            }
-          }
-        }
         }
 
         nodeMetadata.folderType = folderType;
@@ -928,18 +901,52 @@ async function importFromZip(importData: any) {
     // IDマッピングを作成（元のID -> 新しいノード）
     const idMapping = new Map<string, SceneNode>();
 
-    // フレームノードを作成
-    for (const nodeData of nodes) {
+    // グループとフレームを先に作成（子ノードを持つノード）
+    const groupAndFrameNodes = nodes.filter(node => 
+      node.metadata.type === 'GROUP' || node.metadata.type === 'FRAME'
+    );
+    
+    const otherNodes = nodes.filter(node => 
+      node.metadata.type !== 'GROUP' && node.metadata.type !== 'FRAME'
+    );
+    
+    console.log(`Creating ${groupAndFrameNodes.length} group/frame nodes first`);
+    console.log(`Group nodes: ${groupAndFrameNodes.filter(n => n.metadata.type === 'GROUP').length}`);
+    console.log(`Frame nodes: ${groupAndFrameNodes.filter(n => n.metadata.type === 'FRAME').length}`);
+    
+    // グループとフレームを先に作成
+    for (const nodeData of groupAndFrameNodes) {
       const nodeMetadata = nodeData.metadata;
       let createdNode: SceneNode | null = null;
       
-      console.log(`Processing node: ${nodeMetadata.name} (${nodeMetadata.type})`);
+      console.log(`Processing group/frame node: ${nodeMetadata.name} (${nodeMetadata.type})`);
       
       if (nodeMetadata.type === 'FRAME') {
         createdNode = await createFrameFromMetadata(nodeMetadata);
       } else if (nodeMetadata.type === 'GROUP') {
+        console.log(`Creating GROUP: ${nodeMetadata.name} with groupStructure:`, nodeMetadata.groupStructure);
         createdNode = await createGroupFromMetadata(nodeMetadata);
-      } else if (nodeMetadata.type === 'TEXT') {
+      }
+      
+      // 作成されたノードをIDマッピングに追加
+      if (createdNode) {
+        idMapping.set(nodeMetadata.id, createdNode);
+        console.log(`Created group/frame node: ${createdNode.name} (${createdNode.type}) with ID: ${createdNode.id}`);
+      } else {
+        console.warn(`Failed to create group/frame node: ${nodeMetadata.name} (${nodeMetadata.type})`);
+      }
+    }
+    
+    // その他のノードを作成
+    console.log(`Creating ${otherNodes.length} other nodes`);
+    
+    for (const nodeData of otherNodes) {
+      const nodeMetadata = nodeData.metadata;
+      let createdNode: SceneNode | null = null;
+      
+      console.log(`Processing other node: ${nodeMetadata.name} (${nodeMetadata.type})`);
+      
+      if (nodeMetadata.type === 'TEXT') {
         createdNode = await createTextFromMetadata(nodeMetadata);
       } else if (nodeMetadata.type === 'RECTANGLE' || nodeMetadata.type === 'ELLIPSE' || nodeMetadata.type === 'POLYGON' || nodeMetadata.type === 'STAR' || nodeMetadata.type === 'VECTOR') {
         createdNode = await createShapeFromMetadata(nodeMetadata);
@@ -950,13 +957,13 @@ async function importFromZip(importData: any) {
       // 作成されたノードをIDマッピングに追加
       if (createdNode) {
         idMapping.set(nodeMetadata.id, createdNode);
-        console.log(`Created node: ${createdNode.name} (${createdNode.type}) with ID: ${createdNode.id}`);
+        console.log(`Created other node: ${createdNode.name} (${createdNode.type}) with ID: ${createdNode.id}`);
       } else {
-        console.warn(`Failed to create node: ${nodeMetadata.name} (${nodeMetadata.type})`);
+        console.warn(`Failed to create other node: ${nodeMetadata.name} (${nodeMetadata.type})`);
       }
     }
 
-    // 子ノードの配置を処理
+    // 子ノードの配置を処理（フレームのみ、グループは既に処理済み）
     await processChildNodes(nodes, idMapping);
 
     // インポート完了を通知
@@ -1192,21 +1199,264 @@ async function createFrameFromMetadata(frameMetadata: any) {
 // グループをメタデータから作成
 async function createGroupFromMetadata(groupMetadata: any) {
   try {
-    // 一時的な矩形を作成してグループ化
+    console.log(`Creating group: ${groupMetadata.name}`);
+    console.log(`Group metadata:`, {
+      id: groupMetadata.id,
+      name: groupMetadata.name,
+      type: groupMetadata.type,
+      x: groupMetadata.x,
+      y: groupMetadata.y,
+      width: groupMetadata.width,
+      height: groupMetadata.height,
+      hasGroupStructure: !!groupMetadata.groupStructure,
+      childrenCount: groupMetadata.groupStructure?.children?.length || 0
+    });
+    
+    // グループの子ノード情報を取得
+    const groupChildren = groupMetadata.groupStructure?.children || [];
+    
+    if (groupChildren.length === 0) {
+      console.warn(`Group "${groupMetadata.name}" has no children, creating empty group`);
+      // 子ノードがない場合は空のグループを作成
+      // 一時的な矩形を作成してグループ化し、削除しない
+      const tempRect = figma.createRectangle();
+      tempRect.name = 'temp';
+      tempRect.resize(1, 1);
+      tempRect.x = groupMetadata.x || 0;
+      tempRect.y = groupMetadata.y || 0;
+      
+      // グループを作成
+      const emptyGroup = figma.group([tempRect], figma.currentPage);
+      emptyGroup.name = groupMetadata.name || 'Empty Group';
+      
+      // 基本プロパティを設定
+      if (groupMetadata.visible !== undefined) {
+        emptyGroup.visible = groupMetadata.visible;
+      }
+      if (groupMetadata.locked !== undefined) {
+        emptyGroup.locked = groupMetadata.locked;
+      }
+      
+      // 回転
+      if (groupMetadata.rotation !== null && groupMetadata.rotation !== undefined) {
+        emptyGroup.rotation = groupMetadata.rotation;
+      }
+      
+      // レイアウト情報
+      if (groupMetadata.layoutAlign !== null && groupMetadata.layoutAlign !== undefined) {
+        emptyGroup.layoutAlign = groupMetadata.layoutAlign;
+      }
+      if (groupMetadata.layoutGrow !== null && groupMetadata.layoutGrow !== undefined) {
+        emptyGroup.layoutGrow = groupMetadata.layoutGrow;
+      }
+      
+      // エフェクト
+      if (groupMetadata.effects && Array.isArray(groupMetadata.effects)) {
+        emptyGroup.effects = groupMetadata.effects;
+      }
+      
+      // ブレンドモード
+      if (groupMetadata.blendMode !== null && groupMetadata.blendMode !== undefined) {
+        emptyGroup.blendMode = groupMetadata.blendMode;
+      }
+      
+      // 透明度
+      if (groupMetadata.opacity !== null && groupMetadata.opacity !== undefined) {
+        emptyGroup.opacity = groupMetadata.opacity;
+      }
+      
+      // グループのサイズを設定
+      emptyGroup.resize(groupMetadata.width || 100, groupMetadata.height || 100);
+      
+      // 一時的なノードは削除しない（空のグループを維持するため）
+      
+      // 現在のページに追加
+      figma.currentPage.appendChild(emptyGroup);
+      figma.currentPage.selection = [emptyGroup];
+      
+      console.log(`Empty group "${emptyGroup.name}" created successfully`);
+      return emptyGroup;
+    }
+    
+    // 子ノードを先に作成
+    const childNodes: SceneNode[] = [];
+    const childPositions: { x: number, y: number }[] = [];
+    
+    console.log(`Creating ${groupChildren.length} child nodes for group`);
+    
+    for (const childInfo of groupChildren) {
+      console.log(`Creating child: ${childInfo.name} (${childInfo.type})`);
+      
+      const childNode = await createChildNode(childInfo);
+      if (childNode) {
+        childNodes.push(childNode);
+        childPositions.push({
+          x: childInfo.x || 0,
+          y: childInfo.y || 0
+        });
+        console.log(`Created child node: ${childNode.name}`);
+      }
+    }
+    
+    if (childNodes.length === 0) {
+      console.warn(`No valid child nodes created for group "${groupMetadata.name}"`);
+      // 有効な子ノードがない場合は空のグループを作成
+      const tempRect = figma.createRectangle();
+      tempRect.name = 'temp';
+      tempRect.resize(1, 1);
+      tempRect.x = groupMetadata.x || 0;
+      tempRect.y = groupMetadata.y || 0;
+      
+      // グループを作成
+      const emptyGroup = figma.group([tempRect], figma.currentPage);
+      emptyGroup.name = groupMetadata.name || 'Empty Group';
+      
+      // 基本プロパティを設定
+      if (groupMetadata.visible !== undefined) {
+        emptyGroup.visible = groupMetadata.visible;
+      }
+      if (groupMetadata.locked !== undefined) {
+        emptyGroup.locked = groupMetadata.locked;
+      }
+      
+      // 回転
+      if (groupMetadata.rotation !== null && groupMetadata.rotation !== undefined) {
+        emptyGroup.rotation = groupMetadata.rotation;
+      }
+      
+      // レイアウト情報
+      if (groupMetadata.layoutAlign !== null && groupMetadata.layoutAlign !== undefined) {
+        emptyGroup.layoutAlign = groupMetadata.layoutAlign;
+      }
+      if (groupMetadata.layoutGrow !== null && groupMetadata.layoutGrow !== undefined) {
+        emptyGroup.layoutGrow = groupMetadata.layoutGrow;
+      }
+      
+      // エフェクト
+      if (groupMetadata.effects && Array.isArray(groupMetadata.effects)) {
+        emptyGroup.effects = groupMetadata.effects;
+      }
+      
+      // ブレンドモード
+      if (groupMetadata.blendMode !== null && groupMetadata.blendMode !== undefined) {
+        emptyGroup.blendMode = groupMetadata.blendMode;
+      }
+      
+      // 透明度
+      if (groupMetadata.opacity !== null && groupMetadata.opacity !== undefined) {
+        emptyGroup.opacity = groupMetadata.opacity;
+      }
+      
+      // グループのサイズを設定
+      emptyGroup.resize(groupMetadata.width || 100, groupMetadata.height || 100);
+      
+      // 一時的なノードは削除しない（空のグループを維持するため）
+      
+      // 現在のページに追加
+      figma.currentPage.appendChild(emptyGroup);
+      figma.currentPage.selection = [emptyGroup];
+      
+      console.log(`Empty group "${emptyGroup.name}" created successfully`);
+      return emptyGroup;
+    }
+    
+    // 空のグループを先に作成
     const tempRect = figma.createRectangle();
     tempRect.name = 'temp';
     tempRect.resize(1, 1);
     tempRect.x = groupMetadata.x || 0;
     tempRect.y = groupMetadata.y || 0;
     
-    // グループを作成（一時的なノードを含む）
+    // グループを作成
     const group = figma.group([tempRect], figma.currentPage);
+    group.name = groupMetadata.name || 'Imported Group';
     
     // 基本プロパティを設定
-    group.name = groupMetadata.name || 'Imported Group';
-    group.x = groupMetadata.x || 0;
-    group.y = groupMetadata.y || 0;
-    group.resize(groupMetadata.width || 100, groupMetadata.height || 100);
+    if (groupMetadata.visible !== undefined) {
+      group.visible = groupMetadata.visible;
+    }
+    if (groupMetadata.locked !== undefined) {
+      group.locked = groupMetadata.locked;
+    }
+    
+    // 回転
+    if (groupMetadata.rotation !== null && groupMetadata.rotation !== undefined) {
+      group.rotation = groupMetadata.rotation;
+    }
+    
+    // レイアウト情報
+    if (groupMetadata.layoutAlign !== null && groupMetadata.layoutAlign !== undefined) {
+      group.layoutAlign = groupMetadata.layoutAlign;
+    }
+    if (groupMetadata.layoutGrow !== null && groupMetadata.layoutGrow !== undefined) {
+      group.layoutGrow = groupMetadata.layoutGrow;
+    }
+    
+    // エフェクト
+    if (groupMetadata.effects && Array.isArray(groupMetadata.effects)) {
+      group.effects = groupMetadata.effects;
+    }
+    
+    // ブレンドモード
+    if (groupMetadata.blendMode !== null && groupMetadata.blendMode !== undefined) {
+      group.blendMode = groupMetadata.blendMode;
+    }
+    
+    // 透明度
+    if (groupMetadata.opacity !== null && groupMetadata.opacity !== undefined) {
+      group.opacity = groupMetadata.opacity;
+    }
+    
+    // グループの位置を設定
+    const groupX = groupMetadata.x || 0;
+    const groupY = groupMetadata.y || 0;
+    group.x = groupX;
+    group.y = groupY;
+    
+    // 子ノードをグループに追加
+    for (let i = 0; i < childNodes.length; i++) {
+      const childNode = childNodes[i];
+      const relativePos = childPositions[i];
+      
+      // グループに子ノードを追加
+      group.appendChild(childNode);
+      
+      // グループ内での相対位置を設定
+      const newX = relativePos.x;
+      const newY = relativePos.y;
+      
+      childNode.x = newX;
+      childNode.y = newY;
+      
+      console.log(`Added child "${childNode.name}" to group at relative position (${childNode.x}, ${childNode.y})`);
+    }
+    
+    // 一時的なノードを削除
+    tempRect.remove();
+    
+    // グループのサイズを子ノードに基づいて調整
+    if (childNodes.length > 0) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      
+      for (const childNode of childNodes) {
+        minX = Math.min(minX, childNode.x);
+        minY = Math.min(minY, childNode.y);
+        maxX = Math.max(maxX, childNode.x + childNode.width);
+        maxY = Math.max(maxY, childNode.y + childNode.height);
+      }
+      
+      const groupWidth = maxX - minX;
+      const groupHeight = maxY - minY;
+      
+      // グループのサイズを設定（最小サイズを保証）
+      group.resize(Math.max(groupWidth, groupMetadata.width || 100), 
+                   Math.max(groupHeight, groupMetadata.height || 100));
+      
+      console.log(`Group size adjusted to (${group.width}, ${group.height})`);
+    } else {
+      // デフォルトサイズを設定
+      group.resize(groupMetadata.width || 100, groupMetadata.height || 100);
+    }
     
     // 可視性とロック状態
     if (groupMetadata.visible !== undefined) {
@@ -1244,24 +1494,13 @@ async function createGroupFromMetadata(groupMetadata: any) {
       group.opacity = groupMetadata.opacity;
     }
     
-    // グループ構造の情報を保存（後で子ノードを作成する際に使用）
-    if (groupMetadata.groupStructure && groupMetadata.groupStructure.children) {
-      // グループの子ノード情報を保存（後で処理）
-      console.log(`Group "${group.name}" created with ${groupMetadata.groupStructure.children.length} children`);
-    }
-    
-    // 一時的なノードを削除（子ノードが追加される前に）
-    if (group.children.length > 0 && group.children[0].name === 'temp') {
-      group.children[0].remove();
-      console.log('Removed temporary node from group');
-    }
-    
     // 現在のページに追加
     figma.currentPage.appendChild(group);
     
     // 作成したグループを選択
     figma.currentPage.selection = [group];
     
+    console.log(`Group "${group.name}" created successfully with ${childNodes.length} children`);
     return group;
     
   } catch (error: any) {
@@ -1388,7 +1627,7 @@ async function createTextFromMetadata(textMetadata: any) {
       text.paragraphSpacing = textMetadata.paragraphSpacing;
     }
     
-    // 塗りつぶし（テキストの色）
+    // 塗りつぶし（テキストの色）を設定
     if (textMetadata.textFills && Array.isArray(textMetadata.textFills)) {
       // グラデーション関連のプロパティを除去してから設定
       const cleanTextFills = textMetadata.textFills.map((fill: any) => {
@@ -1734,7 +1973,7 @@ async function createShapeFromMetadata(shapeMetadata: any) {
 // 子ノードの配置を処理
 async function processChildNodes(nodes: any[], idMapping: Map<string, SceneNode>) {
   try {
-    // 各ノードの子ノードを処理
+    // 各ノードの子ノードを処理（フレームのみ、グループは既に処理済み）
     for (const nodeData of nodes) {
       const nodeMetadata = nodeData.metadata;
       
@@ -1743,7 +1982,7 @@ async function processChildNodes(nodes: any[], idMapping: Map<string, SceneNode>
         await processFrameChildren(nodeMetadata.frameStructure, idMapping);
       }
       
-      // グループの子ノードを処理
+      // グループの子ノードは既にcreateGroupFromMetadataで処理済みのため、ここでは追加処理のみ
       if (nodeMetadata.type === 'GROUP' && nodeMetadata.groupStructure && nodeMetadata.groupStructure.children) {
         await processGroupChildren(nodeMetadata.groupStructure, idMapping);
       }
@@ -1807,32 +2046,21 @@ async function processGroupChildren(groupStructure: any, idMapping: Map<string, 
       return;
     }
     
-    console.log(`Processing ${groupStructure.children.length} children for group: ${group.name}`);
+    console.log(`Processing group children for: ${group.name}`);
     
-    // 子ノードを処理
-    for (const childInfo of groupStructure.children) {
-      console.log(`Creating child node: ${childInfo.name} at (${childInfo.x}, ${childInfo.y})`);
-      
-      // 子ノードを作成
-      const childNode = await createChildNode(childInfo);
-      if (childNode) {
-        // グループに追加
-        group.appendChild(childNode);
-        
-        // 相対位置を設定（グループ内での位置）
-        const relativeX = childInfo.x || 0;
-        const relativeY = childInfo.y || 0;
-        
-        // グループの位置を考慮して絶対座標を計算
-        childNode.x = group.x + relativeX;
-        childNode.y = group.y + relativeY;
-        
-        console.log(`Child node positioned at (${childNode.x}, ${childNode.y})`);
-        
-        // 作成されたノードマップに追加
-        idMapping.set(childNode.id, childNode);
+    // グループの子ノードは既にcreateGroupFromMetadataで処理されているため、
+    // ここでは追加の処理のみ行う
+    
+    // 子ノードのプロパティを最終調整
+    for (const child of group.children) {
+      // 子ノードのIDをマッピングに追加（まだ追加されていない場合）
+      if (!idMapping.has(child.id)) {
+        idMapping.set(child.id, child);
+        console.log(`Added child node to mapping: ${child.name} (${child.id})`);
       }
     }
+    
+    console.log(`Group "${group.name}" processing completed`);
     
   } catch (error: any) {
     console.error(`Failed to process group children: ${groupStructure.id}`, error);
@@ -1882,6 +2110,63 @@ async function createChildNode(childInfo: any): Promise<SceneNode | null> {
       case 'COMPONENT':
         childNode = figma.createRectangle();
         break;
+      case 'GROUP':
+        // グループの子ノードとしてグループを作成する場合
+        console.log(`Creating nested group: ${childInfo.name}`);
+        // 一時的な矩形を作成してグループ化
+        const tempRect = figma.createRectangle();
+        tempRect.name = 'temp';
+        tempRect.resize(1, 1);
+        tempRect.x = childInfo.x || 0;
+        tempRect.y = childInfo.y || 0;
+        
+        // グループを作成
+        childNode = figma.group([tempRect], figma.currentPage);
+        childNode.name = childInfo.name || 'Nested Group';
+        
+        // 基本プロパティを設定
+        if (childInfo.visible !== undefined) {
+          childNode.visible = childInfo.visible;
+        }
+        if (childInfo.locked !== undefined) {
+          childNode.locked = childInfo.locked;
+        }
+        
+        // 回転
+        if (childInfo.rotation !== null && childInfo.rotation !== undefined) {
+          childNode.rotation = childInfo.rotation;
+        }
+        
+        // レイアウト情報
+        if (childInfo.layoutAlign !== null && childInfo.layoutAlign !== undefined) {
+          childNode.layoutAlign = childInfo.layoutAlign;
+        }
+        if (childInfo.layoutGrow !== null && childInfo.layoutGrow !== undefined) {
+          childNode.layoutGrow = childInfo.layoutGrow;
+        }
+        
+        // エフェクト
+        if (childInfo.effects && Array.isArray(childInfo.effects)) {
+          childNode.effects = childInfo.effects;
+        }
+        
+        // ブレンドモード
+        if (childInfo.blendMode !== null && childInfo.blendMode !== undefined) {
+          childNode.blendMode = childInfo.blendMode;
+        }
+        
+        // 透明度
+        if (childInfo.opacity !== null && childInfo.opacity !== undefined) {
+          childNode.opacity = childInfo.opacity;
+        }
+        
+        // グループのサイズを設定
+        childNode.resize(childInfo.width || 100, childInfo.height || 100);
+        
+        // 一時的なノードは削除しない（空のグループを維持するため）
+        
+        console.log(`Created nested group: ${childNode.name}`);
+        return childNode;
       default:
         console.warn(`Unsupported child node type: ${childInfo.type}, creating rectangle as fallback`);
         childNode = figma.createRectangle();
@@ -1891,6 +2176,16 @@ async function createChildNode(childInfo: any): Promise<SceneNode | null> {
     // 基本プロパティを設定
     childNode.name = childInfo.name || 'Child Node';
     childNode.resize(childInfo.width || 50, childInfo.height || 50);
+    
+    // 位置を設定（重要）
+    if (childInfo.x !== null && childInfo.x !== undefined) {
+      childNode.x = childInfo.x;
+    }
+    if (childInfo.y !== null && childInfo.y !== undefined) {
+      childNode.y = childInfo.y;
+    }
+    
+    console.log(`Created child node: ${childNode.name} at (${childNode.x}, ${childNode.y}) with size (${childNode.width}, ${childNode.height})`);
     
     // テキストノードの場合は特別な処理
     if (childInfo.type === 'TEXT') {
