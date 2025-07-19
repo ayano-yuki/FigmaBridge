@@ -1,6 +1,6 @@
 {
-  "name": "Simple Figma Plugin",
-  "id": "simple-figma-plugin",
+  "name": "ZIP Import/Export Plugin",
+  "id": "zip-import-export-plugin",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",

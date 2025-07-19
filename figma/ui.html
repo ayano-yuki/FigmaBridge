@@ -2,32 +2,224 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>円を作成</title>
+  <title>ZIPインポート</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <style>
-    body { font-family: sans-serif; margin: 16px; }
-    #status { margin-top: 8px; color: #333; }
-    #error { color: red; margin-top: 8px; }
+    body { 
+      font-family: sans-serif; 
+      margin: 16px; 
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 16px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #333;
+    }
+    select {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      background: white;
+    }
+    select:focus {
+      outline: none;
+      border-color: #18a0fb;
+    }
+    button { 
+      background: #18a0fb;
+      color: white;
+      border: none;
+      padding: 12px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      width: 100%;
+      margin-bottom: 12px;
+    }
+    button:hover {
+      background: #0d8ce0;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    #status { 
+      margin-top: 8px; 
+      color: #333; 
+      font-size: 12px;
+    }
+    #error { 
+      color: #e74c3c; 
+      margin-top: 8px; 
+      font-size: 12px;
+    }
+    .info {
+      font-size: 11px;
+      color: #666;
+      margin-top: 8px;
+      line-height: 1.4;
+    }
+    .progress {
+      margin-top: 8px;
+      font-size: 11px;
+      color: #666;
+    }
   </style>
 </head>
 <body>
-  <button id="create-circle">円を作成</button>
-  <div id="status"></div>
-  <div id="error"></div>
+  <div class="container">
+    <div class="form-group">
+      <label for="export-type">エクスポートタイプ</label>
+      <select id="export-type">
+        <option value="selected">選択したノード</option>
+        <option value="page">現在のページ</option>
+        <option value="file">ファイル全体</option>
+      </select>
+    </div>
+    
+    <button id="export-btn">ZIPファイルでエクスポート</button>
+    
+    <div id="status"></div>
+    <div id="error"></div>
+    <div id="progress" class="progress"></div>
+    
+    <div class="info">
+      • 選択したノード: 選択中のノードのみをエクスポート<br>
+      • 現在のページ: 現在のページ全体をエクスポート<br>
+      • ファイル全体: ファイル内のすべてのページをエクスポート<br>
+      <br>
+      ※ エクスポートされたZIPファイルは、他のFigmaファイルでインポートしてデザインを再現できます
+    </div>
+  </div>
   <script>
-    const btn = document.getElementById('create-circle');
+    const exportTypeSelect = document.getElementById('export-type');
+    const exportBtn = document.getElementById('export-btn');
     const statusDiv = document.getElementById('status');
     const errorDiv = document.getElementById('error');
-    btn.onclick = () => {
-      parent.postMessage({ pluginMessage: { type: 'create-circle' } }, '*');
+    const progressDiv = document.getElementById('progress');
+
+    function setButtonState(disabled) {
+      exportBtn.disabled = disabled;
+    }
+
+    function clearMessages() {
+      statusDiv.textContent = '';
+      errorDiv.textContent = '';
+      progressDiv.textContent = '';
+    }
+
+    function updateProgress(message) {
+      progressDiv.textContent = message;
+    }
+
+    async function createAndDownloadZip(exportData) {
+      const zip = new JSZip();
+      
+      updateProgress('ZIPファイルを作成中...');
+      
+      // メタデータをJSONファイルとして追加
+      zip.file('metadata.json', JSON.stringify(exportData.metadata, null, 2));
+      
+      // imgフォルダを作成
+      const imgFolder = zip.folder('img');
+      
+      // 画像ファイルのリストを作成
+      const imageFiles = [];
+      
+      // 各ノードのメタデータと画像を追加
+      for (const node of exportData.nodes) {
+        // ノード固有のメタデータはルートに追加（インポート時に必要）
+        const nodeMetadataFileName = `${node.name}_metadata.json`;
+        zip.file(nodeMetadataFileName, JSON.stringify(node.metadata, null, 2));
+        
+        // 画像データがある場合はimgフォルダに追加
+        if (node.bytes) {
+          const actualNodeName = node.name || 'unnamed';
+          const fileName = `${actualNodeName}.${node.metadata.fileExtension || 'png'}`;
+          imgFolder.file(fileName, node.bytes);
+          
+          // 画像ファイルの情報をリストに追加
+          imageFiles.push({
+            nodeId: node.metadata.id,
+            nodeName: actualNodeName,
+            fileName: fileName,
+            fileSize: node.bytes.length,
+            filePath: `img/${fileName}`
+          });
+        }
+      }
+      
+      // 画像ファイルのリストをJSONとして追加
+      zip.file('image_files.json', JSON.stringify(imageFiles, null, 2));
+      
+      updateProgress('ZIPファイルをダウンロード中...');
+      
+      const content = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(content);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `FigmaData-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      updateProgress('');
+    }
+
+    exportBtn.onclick = () => {
+      clearMessages();
+      setButtonState(true);
+      statusDiv.textContent = 'エクスポート中...';
+      
+      const exportType = exportTypeSelect.value;
+      parent.postMessage({ 
+        pluginMessage: { 
+          type: 'export-zip',
+          exportType: exportType
+        } 
+      }, '*');
     };
-    window.onmessage = (event) => {
+
+    window.onmessage = async (event) => {
       const msg = event.data.pluginMessage;
       if (!msg) return;
+      
+      setButtonState(false);
+      
       if (msg.type === 'error') {
         errorDiv.textContent = `エラー: ${msg.message}`;
+        statusDiv.textContent = '';
+        updateProgress('');
       }
       if (msg.type === 'status') {
         statusDiv.textContent = msg.message;
+        errorDiv.textContent = '';
+        updateProgress('');
+      }
+      if (msg.type === 'export-data') {
+        try {
+          await createAndDownloadZip(msg.data);
+          statusDiv.textContent = `ZIPファイルをダウンロードしました (${msg.data.nodes.length}個のノード)`;
+          errorDiv.textContent = '';
+        } catch (error) {
+          errorDiv.textContent = `ZIP作成エラー: ${error.message}`;
+          statusDiv.textContent = '';
+        }
+        updateProgress('');
       }
     };
   </script>
