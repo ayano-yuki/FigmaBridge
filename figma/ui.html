@@ -2,510 +2,370 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>ZIPインポート</title>
+  <title>Figma Bridge</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script>
+    // JSZipライブラリの読み込み確認と初期化
+    let JSZipLoaded = false;
+    
+    function initializeJSZip() {
+      if (typeof JSZip !== 'undefined') {
+        JSZipLoaded = true;
+        console.log('JSZipライブラリが読み込まれました');
+        return Promise.resolve();
+      }
+      
+      return new Promise((resolve, reject) => {
+        // 代替CDNを試す
+        const script = document.createElement('script');
+        script.src = 'https://unpkg.com/jszip@3.10.1/dist/jszip.min.js';
+        script.onload = () => {
+          JSZipLoaded = true;
+          console.log('JSZipライブラリが読み込まれました（代替CDN）');
+          resolve();
+        };
+        script.onerror = () => {
+          console.error('JSZipライブラリの読み込みに失敗しました');
+          reject(new Error('JSZipライブラリの読み込みに失敗しました'));
+        };
+        document.head.appendChild(script);
+      });
+    }
+    
+    // 初期化を実行
+    initializeJSZip().catch(error => {
+      console.error('JSZip初期化エラー:', error);
+    });
+  </script>
   <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      margin: 0;
-      padding: 20px;
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+      margin: 16px; 
       background: #f5f5f5;
     }
-
     .container {
-      max-width: 600px;
-      margin: 0 auto;
       background: white;
       border-radius: 8px;
-      padding: 24px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      padding: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
-
     h2 {
-      margin: 0 0 24px 0;
+      margin: 0 0 16px 0;
       color: #333;
-      text-align: center;
-      font-size: 24px;
-      font-weight: 600;
+      font-size: 18px;
     }
-
     .section {
-      margin-bottom: 32px;
-      padding: 20px;
+      margin-bottom: 20px;
+      padding: 12px;
       border: 1px solid #e0e0e0;
       border-radius: 6px;
       background: #fafafa;
     }
-
     .section h3 {
-      margin: 0 0 16px 0;
-      color: #333;
-      font-size: 18px;
-      font-weight: 600;
-    }
-
-    .form-group {
-      margin-bottom: 16px;
-    }
-
-    .form-group label {
-      display: block;
-      margin-bottom: 6px;
-      font-weight: 500;
+      margin: 0 0 12px 0;
+      font-size: 14px;
       color: #555;
     }
-
-    .form-group select,
-    .form-group input[type="file"] {
-      width: 100%;
-      padding: 8px 12px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      font-size: 14px;
-      background: white;
-    }
-
-    .form-group select:focus,
-    .form-group input[type="file"]:focus {
-      outline: none;
-      border-color: #007AFF;
-      box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.2);
-    }
-
-    .btn {
-      padding: 10px 20px;
+    button {
+      background: #18a0fb;
+      color: white;
       border: none;
+      padding: 8px 16px;
       border-radius: 6px;
-      font-size: 14px;
-      font-weight: 500;
       cursor: pointer;
-      transition: all 0.2s ease;
-      display: inline-block;
-      text-decoration: none;
-      text-align: center;
+      font-size: 12px;
+      margin: 4px;
     }
-
-    .btn:disabled {
-      opacity: 0.5;
+    button:hover {
+      background: #0d8ce0;
+    }
+    button:disabled {
+      background: #ccc;
       cursor: not-allowed;
     }
-
-    .btn-primary {
-      background: #007AFF;
-      color: white;
+    .radio-group {
+      margin: 8px 0;
     }
-
-    .btn-primary:hover:not(:disabled) {
-      background: #0056CC;
+    .radio-group label {
+      display: block;
+      margin: 4px 0;
+      font-size: 12px;
     }
-
-    .btn-secondary {
-      background: #6C757D;
-      color: white;
+    input[type="radio"] {
+      margin-right: 6px;
     }
-
-    .btn-secondary:hover:not(:disabled) {
-      background: #545B62;
+    #status {
+      margin-top: 12px;
+      padding: 8px;
+      border-radius: 4px;
+      font-size: 12px;
     }
-
-    .progress {
-      margin-top: 20px;
-      padding: 16px;
-      background: #f8f9fa;
-      border-radius: 6px;
-      border: 1px solid #e9ecef;
-    }
-
-    .progress.hidden {
-      display: none;
-    }
-
-    .progress-bar {
-      width: 0%;
-      height: 4px;
-      background: #007AFF;
-      border-radius: 2px;
-      transition: width 0.3s ease;
-      margin-bottom: 8px;
-    }
-
-    .progress-text {
-      font-size: 14px;
-      color: #666;
-      text-align: center;
-    }
-
-    .result {
-      margin-top: 20px;
-      padding: 16px;
-      border-radius: 6px;
-    }
-
-    .result.hidden {
-      display: none;
-    }
-
-    .result-content {
-      font-size: 14px;
-      line-height: 1.5;
-    }
-
     .success {
-      color: #28a745;
       background: #d4edda;
+      color: #155724;
       border: 1px solid #c3e6cb;
-      padding: 12px;
-      border-radius: 4px;
     }
-
     .error {
-      color: #dc3545;
       background: #f8d7da;
+      color: #721c24;
       border: 1px solid #f5c6cb;
-      padding: 12px;
-      border-radius: 4px;
     }
-
     .info {
-      margin-top: 20px;
-      padding: 16px;
-      background: #e7f3ff;
-      border: 1px solid #b3d9ff;
-      border-radius: 6px;
-      font-size: 14px;
-      line-height: 1.6;
-      color: #0056CC;
+      background: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+    #file-input {
+      display: none;
+    }
+    .file-upload {
+      background: #28a745;
+    }
+    .file-upload:hover {
+      background: #218838;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h2>FigmaBridge</h2>
+    <h2>Figma Bridge</h2>
     
     <!-- エクスポート機能 -->
     <div class="section">
       <h3>エクスポート</h3>
-      <div class="form-group">
-        <label for="exportType">エクスポートタイプ:</label>
-        <select id="exportType">
-          <option value="selected">選択されたノード</option>
-          <option value="page">現在のページ</option>
-        </select>
+      <div class="radio-group">
+        <label>
+          <input type="radio" name="export-target" value="selected" checked>
+          指定したノード
+        </label>
+        <label>
+          <input type="radio" name="export-target" value="current-page">
+          現在のページ
+        </label>
       </div>
-      <button id="exportBtn" class="btn btn-primary">エクスポート</button>
+      <button id="export-btn">エクスポート</button>
     </div>
 
     <!-- インポート機能 -->
     <div class="section">
       <h3>インポート</h3>
-      <div class="form-group">
-        <label for="importFile">ZIPファイルを選択:</label>
-        <input type="file" id="importFile" accept=".zip" />
-      </div>
-      <button id="importBtn" class="btn btn-secondary" disabled>インポート</button>
+      <input type="file" id="file-input" accept=".zip">
+      <button id="import-btn" class="file-upload">ZIPファイルを選択</button>
     </div>
 
-    <!-- 進捗表示 -->
-    <div id="progress" class="progress hidden">
-      <div class="progress-bar"></div>
-      <div class="progress-text"></div>
-    </div>
-
-    <!-- 結果表示 -->
-    <div id="result" class="result hidden">
-      <div class="result-content"></div>
-    </div>
+    <div id="status"></div>
   </div>
+
   <script>
-    // JSZipライブラリを読み込み
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
-    document.head.appendChild(script);
+    const exportBtn = document.getElementById('export-btn');
+    const importBtn = document.getElementById('import-btn');
+    const fileInput = document.getElementById('file-input');
+    const statusDiv = document.getElementById('status');
 
-    script.onload = function() {
-      initializeApp();
-    };
-
-    function initializeApp() {
-      const exportBtn = document.getElementById('exportBtn');
-      const importBtn = document.getElementById('importBtn');
-      const importFile = document.getElementById('importFile');
-      const progress = document.getElementById('progress');
-      const result = document.getElementById('result');
-
-      // 要素が存在しない場合のエラーハンドリング
-      if (!exportBtn || !importBtn || !importFile) {
-        console.error('Required elements not found');
-        return;
-      }
-
-      // エクスポートボタンのイベント
-      exportBtn.addEventListener('click', async () => {
-        const exportType = document.getElementById('exportType').value;
-        
-        showProgress('エクスポートを開始しています...');
-        
-        try {
-          parent.postMessage({ 
-            pluginMessage: { 
-              type: 'export-zip', 
-              exportType: exportType 
-            } 
-          }, '*');
-        } catch (error) {
-          showError(`エクスポートエラー: ${error.message}`);
-        }
-      });
-
-      // ファイル選択のイベント
-      importFile.addEventListener('change', (event) => {
-        const file = event.target.files[0];
-        if (file) {
-          importBtn.disabled = false;
-        } else {
-          importBtn.disabled = true;
-        }
-      });
-
-      // インポートボタンのイベント
-      importBtn.addEventListener('click', async () => {
-        const file = importFile.files[0];
-        if (!file) {
-          showError('ファイルが選択されていません');
+    // JSZipライブラリの読み込みを待つ関数
+    function waitForJSZip() {
+      return new Promise((resolve, reject) => {
+        if (JSZipLoaded && typeof JSZip !== 'undefined') {
+          resolve();
           return;
         }
 
-        showProgress('ZIPファイルを読み込んでいます...');
-        
-        try {
-          const zip = new JSZip();
-          const zipData = await zip.loadAsync(file);
-          
-          // metadata.jsonを読み込み
-          const metadataFile = zipData.file('metadata.json');
-          if (!metadataFile) {
-            throw new Error('metadata.jsonが見つかりません');
+        // 最大15秒待機
+        let attempts = 0;
+        const maxAttempts = 150;
+        const interval = setInterval(() => {
+          attempts++;
+          if (JSZipLoaded && typeof JSZip !== 'undefined') {
+            clearInterval(interval);
+            resolve();
+          } else if (attempts >= maxAttempts) {
+            clearInterval(interval);
+            reject(new Error('JSZipライブラリの読み込みがタイムアウトしました'));
           }
-          
-          const metadataText = await metadataFile.async('string');
-          const metadata = JSON.parse(metadataText);
-          
-          // メタデータの検証
-          if (!metadata || typeof metadata !== 'object') {
-            throw new Error('metadata.jsonの形式が無効です');
-          }
-          
-          if (!metadata.nodes || !Array.isArray(metadata.nodes)) {
-            throw new Error('metadata.jsonにnodes配列が含まれていません');
-          }
-          
-          console.log('Loaded metadata:', metadata);
-          console.log(`Found ${metadata.nodes.length} nodes to import`);
-          
-          // 画像ファイルを読み込み
-          const imageFiles = await loadImageFiles(zipData);
-          
-          showProgress('インポートを開始しています...');
-          
-          // プラグインにインポートデータを送信
-          parent.postMessage({ 
-            pluginMessage: { 
-              type: 'import-zip', 
-              data: metadata,
-              imageFiles: imageFiles
-            } 
-          }, '*');
-          
-        } catch (error) {
-          console.error('Import error:', error);
-          showError(`インポートエラー: ${error.message}`);
-        }
+        }, 100);
       });
+    }
 
-      // プラグインからのメッセージを受信
-      window.onmessage = async (event) => {
-        const message = event.data.pluginMessage;
-        
-        if (!message) return;
-        
-        switch (message.type) {
-          case 'export-data':
-            await handleExportData(message.data);
-            break;
-            
-          case 'import-progress':
-            showProgress(message.message, message.progress);
-            break;
-            
-          case 'import-complete':
-            showSuccess(`インポートが完了しました。${message.importedCount}個のノードをインポートしました。`);
-            break;
-            
-          case 'error':
-            showError(message.message);
-            break;
-        }
-      };
+    // エクスポート機能
+    exportBtn.onclick = () => {
+      const exportTarget = document.querySelector('input[name="export-target"]:checked').value;
+      
+      statusDiv.textContent = 'エクスポート中...';
+      statusDiv.className = 'info';
+      
+      parent.postMessage({ 
+        pluginMessage: { 
+          type: 'export', 
+          target: exportTarget 
+        } 
+      }, '*');
+    };
 
-      // エクスポートデータの処理
-      async function handleExportData(exportData) {
-        try {
-          showProgress('ZIPファイルを作成しています...');
+    // エクスポート成功時のZIP生成
+    window.addEventListener('message', (event) => {
+      const msg = event.data.pluginMessage;
+      if (msg && msg.type === 'export-success') {
+        const imageCount = msg.imageCount || 0;
+        statusDiv.textContent = `エクスポート完了: ${imageCount}個の画像を処理しました`;
+        statusDiv.className = 'success';
+        generateZIP(msg.data);
+      }
+    });
+
+    // インポート機能
+    importBtn.onclick = () => {
+      fileInput.click();
+    };
+
+    fileInput.onchange = async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      statusDiv.textContent = 'ZIPファイルを処理中...';
+      statusDiv.className = 'info';
+
+      try {
+        // JSZipライブラリの読み込みを待つ
+        console.log('JSZipライブラリの読み込みを待機中...');
+        await waitForJSZip();
+        console.log('JSZipライブラリが利用可能になりました');
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const arrayBuffer = e.target.result;
+          console.log('ZIPファイルを読み込み中...');
           
-          const zip = new JSZip();
-          
-          // メタデータをJSONとして追加
-          zip.file('metadata.json', JSON.stringify(exportData, null, 2));
-          
-          // 画像ファイル用のフォルダを作成
-          const imgFolder = zip.folder('img');
-          const imageFiles = [];
-          
-          // 各ノードを処理
-          for (const node of exportData.nodes) {
-            // 画像データがある場合はimgフォルダに追加
-            if (node.bytes) {
-              const actualNodeName = node.name || 'unnamed';
-              const fileName = `${actualNodeName}.${node.metadata.fileExtension || 'png'}`;
-              imgFolder.file(fileName, node.bytes);
+          // JSZipでZIPファイルを読み込み
+          JSZip.loadAsync(arrayBuffer).then((zipInstance) => {
+            console.log('ZIPファイルの読み込みが完了しました');
+            
+            // design.jsonを読み込み
+            const designJsonFile = zipInstance.file('design.json');
+            if (!designJsonFile) {
+              throw new Error('design.jsonファイルが見つかりません');
+            }
+            console.log('design.jsonファイルを読み込み中...');
+            return designJsonFile.async('string');
+          }).then((jsonData) => {
+            console.log('design.jsonの解析中...');
+            const designData = JSON.parse(jsonData);
+            
+            // ZIPインスタンスを再取得して画像ファイルを読み込み
+            return JSZip.loadAsync(arrayBuffer).then((zipInstance) => {
+              const imagePromises = [];
+              const imageMap = {};
+              let imageCount = 0;
               
-              // 画像ファイルの情報をリストに追加
-              imageFiles.push({
-                nodeId: node.metadata.id,
-                nodeName: actualNodeName,
-                fileName: fileName,
-                fileSize: node.bytes.length,
-                filePath: `img/${fileName}`
+              zipInstance.forEach((relativePath, zipEntry) => {
+                if (relativePath.startsWith('img/') && !zipEntry.dir) {
+                  imageCount++;
+                  console.log(`画像ファイルを処理中: ${relativePath}`);
+                  const promise = zipEntry.async('base64').then((base64) => {
+                    imageMap[relativePath] = base64;
+                    console.log(`画像ファイルを処理完了: ${relativePath}`);
+                  });
+                  imagePromises.push(promise);
+                }
               });
-            }
-          }
-          
-          // 画像ファイルのリストをJSONとして追加
-          if (imageFiles.length > 0) {
-            zip.file('image_files.json', JSON.stringify(imageFiles, null, 2));
-          }
-          
-          showProgress('ZIPファイルをダウンロードしています...');
-          
-          // ZIPファイルを生成してダウンロード
-          const zipBlob = await zip.generateAsync({ type: 'blob' });
-          const url = URL.createObjectURL(zipBlob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `FigmaData_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.zip`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-          
-          showSuccess(`エクスポートが完了しました。${exportData.nodes.length}個のノードをエクスポートしました。`);
-          
-        } catch (error) {
-          showError(`エクスポートエラー: ${error.message}`);
-        }
+
+              console.log(`合計 ${imageCount} 個の画像ファイルを処理します`);
+              return Promise.all(imagePromises).then(() => {
+                console.log('すべての画像ファイルの処理が完了しました');
+                return { designData, imageMap };
+              });
+            });
+          }).then((data) => {
+            console.log('Figmaプラグインにデータを送信中...');
+            // Figmaプラグインにデータを送信
+            parent.postMessage({ 
+              pluginMessage: { 
+                type: 'import', 
+                designData: data.designData,
+                imageMap: data.imageMap
+              } 
+            }, '*');
+          }).catch((error) => {
+            console.error('ZIP処理エラー:', error);
+            statusDiv.textContent = `エラー: ${error.message}`;
+            statusDiv.className = 'error';
+          });
+        };
+        
+        reader.readAsArrayBuffer(file);
+      } catch (error) {
+        console.error('ファイル処理エラー:', error);
+        statusDiv.textContent = `エラー: ${error.message}`;
+        statusDiv.className = 'error';
       }
+    };
 
-      // 画像ファイルを読み込む関数
-      async function loadImageFiles(zipData) {
-        try {
-          const imageFiles = [];
-          const imgFolder = zipData.folder('img');
-          
-          if (!imgFolder) {
-            console.log('No img folder found in ZIP');
-            return imageFiles;
+    // ZIPファイル生成関数
+    async function generateZIP(designData) {
+      try {
+        statusDiv.textContent = 'ZIPファイルを生成中...';
+        statusDiv.className = 'info';
+
+        // JSZipライブラリの読み込みを待つ
+        await waitForJSZip();
+
+        const zip = new JSZip();
+        
+        // design.jsonを追加
+        zip.file('design.json', JSON.stringify(designData, null, 2));
+        
+        // 画像ファイルを追加
+        if (designData.images) {
+          for (const [imagePath, imageData] of Object.entries(designData.images)) {
+            zip.file(imagePath, imageData, { base64: true });
           }
-
-          console.log('Found img folder, loading image files...');
-          
-          for (const fileName in imgFolder.files) {
-            const file = imgFolder.files[fileName];
-            if (file.name.endsWith('.png') || file.name.endsWith('.jpg') || file.name.endsWith('.jpeg') || file.name.endsWith('.gif')) {
-              try {
-                const bytes = await file.async('arraybuffer');
-                imageFiles.push({
-                  fileName: file.name,
-                  bytes: bytes,
-                  nodeId: file.name.replace(/\.[^/.]+$/, ''), // ファイル名から拡張子を除いたIDを推測
-                  nodeName: file.name.replace(/\.[^/.]+$/, ''), // ファイル名から拡張子を除いた名前を推測
-                  fileSize: bytes.length,
-                  filePath: `img/${file.name}`
-                });
-                console.log(`Loaded image file: ${file.name}`);
-              } catch (error) {
-                console.error(`Failed to load image file: ${file.name}`, error);
-              }
-            }
-          }
-          
-          console.log(`Loaded ${imageFiles.length} image files`);
-          return imageFiles;
-          
-        } catch (error) {
-          console.error('Error loading image files:', error);
-          return [];
-        }
-      }
-
-      // 進捗表示
-      function showProgress(message, progress = 0) {
-        const progressElement = document.getElementById('progress');
-        const resultElement = document.getElementById('result');
-        
-        if (progressElement) {
-          progressElement.classList.remove('hidden');
-        }
-        if (resultElement) {
-          resultElement.classList.add('hidden');
         }
         
-        const progressText = progressElement?.querySelector('.progress-text');
-        const progressBar = progressElement?.querySelector('.progress-bar');
+        // ZIPファイルをダウンロード
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(zipBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'figma-design.zip';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
         
-        if (progressText) {
-          progressText.textContent = message;
-        }
-        if (progressBar) {
-          progressBar.style.width = `${progress}%`;
-        }
-      }
-
-      // 成功表示
-      function showSuccess(message) {
-        const progressElement = document.getElementById('progress');
-        const resultElement = document.getElementById('result');
-        
-        if (progressElement) {
-          progressElement.classList.add('hidden');
-        }
-        if (resultElement) {
-          resultElement.classList.remove('hidden');
-        }
-        
-        const resultContent = resultElement?.querySelector('.result-content');
-        if (resultContent) {
-          resultContent.innerHTML = `<div class="success">${message}</div>`;
-        }
-      }
-
-      // エラー表示
-      function showError(message) {
-        const progressElement = document.getElementById('progress');
-        const resultElement = document.getElementById('result');
-        
-        if (progressElement) {
-          progressElement.classList.add('hidden');
-        }
-        if (resultElement) {
-          resultElement.classList.remove('hidden');
-        }
-        
-        const resultContent = resultElement?.querySelector('.result-content');
-        if (resultContent) {
-          resultContent.innerHTML = `<div class="error">${message}</div>`;
-        }
+        statusDiv.textContent = 'ZIPファイルの生成が完了しました';
+        statusDiv.className = 'success';
+      } catch (error) {
+        statusDiv.textContent = `ZIP生成エラー: ${error.message}`;
+        statusDiv.className = 'error';
       }
     }
+
+    // メッセージ受信処理
+    window.onmessage = (event) => {
+      const msg = event.data.pluginMessage;
+      if (!msg) return;
+
+      switch (msg.type) {
+        case 'export-success':
+          // ZIP生成は別のイベントリスナーで処理
+          break;
+        case 'export-error':
+          statusDiv.textContent = `エクスポートエラー: ${msg.message}`;
+          statusDiv.className = 'error';
+          break;
+        case 'import-success':
+          statusDiv.textContent = 'インポートが完了しました';
+          statusDiv.className = 'success';
+          break;
+        case 'import-error':
+          statusDiv.textContent = `インポートエラー: ${msg.message}`;
+          statusDiv.className = 'error';
+          break;
+        case 'status':
+          statusDiv.textContent = msg.message;
+          statusDiv.className = 'info';
+          break;
+      }
+    };
   </script>
 </body>
 </html> 

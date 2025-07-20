@@ -9,2632 +9,698 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-figma.showUI(__html__, { width: 640, height: 650 });
-figma.ui.onmessage = (msg) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        switch (msg.type) {
-            case 'export-zip':
-                yield exportToZip(msg.exportType);
-                break;
-            case 'import-zip':
-                yield importFromZip(msg.data);
-                break;
-            default:
-                throw new Error('不明なメッセージタイプです');
-        }
+// エクスポート機能のクラス
+class DesignExporter {
+    constructor() {
+        this.imageCounter = 0;
     }
-    catch (error) {
-        figma.ui.postMessage({ type: 'error', message: error.message || String(error) });
-    }
-});
-// フレーム内に画像があるかどうかをチェックする関数
-function hasImageInFrame(frame) {
-    const checkNode = (node) => {
-        // 画像フィルを持つノードをチェック
-        if ('fills' in node && node.fills && Array.isArray(node.fills)) {
-            const hasImageFill = node.fills.some(fill => fill.type === 'IMAGE');
-            if (hasImageFill) {
-                return true;
-            }
-        }
-        // 画像ハッシュを持つノードをチェック
-        if ('imageHash' in node && node.imageHash) {
-            return true;
-        }
-        // 子ノードがある場合は再帰的にチェック（フレーム、グループ、コンポーネントなど）
-        if ('children' in node && node.children) {
-            for (const child of node.children) {
-                if (checkNode(child)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    };
-    return checkNode(frame);
-}
-// フレーム内の画像ノードを取得する関数
-function getImageNodesInFrame(frame) {
-    const imageNodes = [];
-    const collectImageNodes = (node) => {
-        // 画像フィルを持つノードをチェック
-        if ('fills' in node && node.fills && Array.isArray(node.fills)) {
-            const hasImageFill = node.fills.some(fill => fill.type === 'IMAGE');
-            if (hasImageFill) {
-                imageNodes.push(node);
-            }
-        }
-        // 画像ハッシュを持つノードをチェック
-        if ('imageHash' in node && node.imageHash) {
-            imageNodes.push(node);
-        }
-        // 子ノードがある場合は再帰的にチェック（フレーム、グループ、コンポーネントなど）
-        if ('children' in node && node.children) {
-            for (const child of node.children) {
-                collectImageNodes(child);
-            }
-        }
-    };
-    collectImageNodes(frame);
-    return imageNodes;
-}
-// グループ内に画像があるかどうかをチェックする関数
-function hasImageInGroup(group) {
-    const checkNode = (node) => {
-        // 画像フィルを持つノードをチェック
-        if ('fills' in node && node.fills && Array.isArray(node.fills)) {
-            const hasImageFill = node.fills.some(fill => fill.type === 'IMAGE');
-            if (hasImageFill) {
-                return true;
-            }
-        }
-        // 画像ハッシュを持つノードをチェック
-        if ('imageHash' in node && node.imageHash) {
-            return true;
-        }
-        // 子ノードがある場合は再帰的にチェック
-        if ('children' in node && node.children) {
-            for (const child of node.children) {
-                if (checkNode(child)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    };
-    return checkNode(group);
-}
-// グループ内の画像ノードを取得する関数
-function getImageNodesInGroup(group) {
-    const imageNodes = [];
-    const collectImageNodes = (node) => {
-        // 画像フィルを持つノードをチェック
-        if ('fills' in node && node.fills && Array.isArray(node.fills)) {
-            const hasImageFill = node.fills.some(fill => fill.type === 'IMAGE');
-            if (hasImageFill) {
-                imageNodes.push(node);
-            }
-        }
-        // 画像ハッシュを持つノードをチェック
-        if ('imageHash' in node && node.imageHash) {
-            imageNodes.push(node);
-        }
-        // 子ノードがある場合は再帰的にチェック
-        if ('children' in node && node.children) {
-            for (const child of node.children) {
-                collectImageNodes(child);
-            }
-        }
-    };
-    collectImageNodes(group);
-    return imageNodes;
-}
-function exportToZip(exportType) {
-    return __awaiter(this, void 0, void 0, function* () {
-        let nodes = [];
-        let metadata = {};
-        switch (exportType) {
-            case 'selected':
-                if (figma.currentPage.selection.length === 0) {
-                    throw new Error('エクスポートするノードを選択してください');
-                }
-                nodes = figma.currentPage.selection;
-                metadata = {
-                    type: 'selected',
-                    count: nodes.length,
-                    exportDate: new Date().toISOString()
-                };
-                break;
-            case 'page':
-                const page = figma.currentPage;
-                nodes = page.children;
-                if (nodes.length === 0) {
-                    throw new Error('現在のページにエクスポート可能なノードがありません');
-                }
-                metadata = {
-                    type: 'page',
-                    pageName: page.name,
-                    count: nodes.length,
-                    exportDate: new Date().toISOString()
-                };
-                break;
-            default:
-                throw new Error('無効なエクスポートタイプです');
-        }
-        const exportSettings = {
-            format: 'PNG',
-            constraint: { type: 'SCALE', value: 2 }
+    // ノードをデザインデータに変換
+    serializeNode(node) {
+        const designNode = {
+            id: node.id,
+            name: node.name,
+            type: node.type,
+            x: node.x,
+            y: node.y,
+            width: node.width,
+            height: node.height,
+            properties: this.getNodeProperties(node)
         };
-        const results = yield Promise.all(nodes.map((node) => __awaiter(this, void 0, void 0, function* () {
-            var _a, _b, _c, _d, _e, _f;
+        // 子ノードがある場合は再帰的に処理
+        if ('children' in node && node.children) {
+            designNode.children = node.children.map(child => this.serializeNode(child));
+        }
+        return designNode;
+    }
+    // ノードのプロパティを取得
+    getNodeProperties(node) {
+        const properties = {};
+        // テキストノードの処理
+        if (node.type === 'TEXT') {
+            const textNode = node;
+            properties.characters = textNode.characters;
+            // 混合スタイルのチェックと処理
+            const hasMixedStyles = textNode.fontName === figma.mixed ||
+                textNode.fontSize === figma.mixed ||
+                textNode.fills === figma.mixed ||
+                textNode.letterSpacing === figma.mixed ||
+                textNode.lineHeight === figma.mixed;
+            // より安全な混合スタイル検出
+            let hasMixedStylesSafe = false;
             try {
-                // グループノードの場合は特別処理
-                if (node.type === 'GROUP') {
-                    const groupNode = node;
-                    // 子要素がない場合はスキップ
-                    if (!groupNode.children || groupNode.children.length === 0) {
-                        return null;
-                    }
-                    const nodeMetadata = {
-                        id: groupNode.id,
-                        name: groupNode.name,
-                        type: 'GROUP',
-                        x: groupNode.x,
-                        y: groupNode.y,
-                        width: groupNode.width,
-                        height: groupNode.height,
-                        visible: groupNode.visible,
-                        locked: groupNode.locked,
-                        folderType: null,
-                        fileExtension: null,
-                        hasImageFile: false
-                    };
-                    // グループの基本プロパティを追加
+                const segments = textNode.getStyledTextSegments(['fontName']);
+                hasMixedStylesSafe = segments.length > 1;
+                console.log(`混合スタイル検出: ${node.name}, セグメント数: ${segments.length}, 混合: ${hasMixedStylesSafe}`);
+            }
+            catch (error) {
+                hasMixedStylesSafe = hasMixedStyles;
+                console.warn(`混合スタイル検出でエラー: ${node.name}`, error);
+            }
+            if (hasMixedStylesSafe) {
+                // 混合スタイルの場合はセグメント情報を保存
+                console.log(`混合スタイルを処理中: ${node.name}`);
+                try {
+                    const segments = textNode.getStyledTextSegments([
+                        'fontName',
+                        'fontSize',
+                        'fills',
+                        'letterSpacing',
+                        'lineHeight'
+                    ]);
+                    console.log(`セグメント数: ${segments.length}`, segments);
+                    // セグメント情報をシリアライズ可能な形式に変換
+                    properties.styledSegments = segments.map((segment, index) => {
+                        console.log(`セグメント ${index}:`, segment);
+                        return {
+                            characters: segment.characters,
+                            start: segment.start,
+                            end: segment.end,
+                            fontName: segment.fontName,
+                            fontSize: segment.fontSize,
+                            fills: segment.fills,
+                            letterSpacing: segment.letterSpacing,
+                            lineHeight: segment.lineHeight
+                        };
+                    });
+                    console.log(`混合スタイルの処理が完了しました: ${node.name}`);
+                }
+                catch (error) {
+                    console.error(`混合スタイルの処理中にエラーが発生しました: ${node.name}`, error);
+                    console.error('エラーの詳細:', error.message, error.stack);
+                    // エラーが発生した場合は単一スタイルとして処理
                     try {
-                        if ('rotation' in groupNode)
-                            nodeMetadata.rotation = groupNode.rotation;
+                        if (typeof textNode.fontSize === 'number')
+                            properties.fontSize = textNode.fontSize;
+                        if (textNode.fontName && typeof textNode.fontName === 'object')
+                            properties.fontName = textNode.fontName;
+                        if (textNode.fills && Array.isArray(textNode.fills))
+                            properties.fills = textNode.fills;
+                        if (textNode.strokes && Array.isArray(textNode.strokes))
+                            properties.strokes = textNode.strokes;
+                        if (typeof textNode.strokeWeight === 'number')
+                            properties.strokeWeight = textNode.strokeWeight;
+                        if (typeof textNode.textAlignHorizontal === 'string')
+                            properties.textAlignHorizontal = textNode.textAlignHorizontal;
+                        if (typeof textNode.textAlignVertical === 'string')
+                            properties.textAlignVertical = textNode.textAlignVertical;
+                        if (typeof textNode.lineHeight === 'number' || typeof textNode.lineHeight === 'object')
+                            properties.lineHeight = textNode.lineHeight;
+                        if (typeof textNode.letterSpacing === 'number' || typeof textNode.letterSpacing === 'object')
+                            properties.letterSpacing = textNode.letterSpacing;
                     }
-                    catch (e) { }
-                    try {
-                        if ('layoutAlign' in groupNode)
-                            nodeMetadata.layoutAlign = groupNode.layoutAlign;
+                    catch (fallbackError) {
+                        console.warn(`フォールバック処理中にエラーが発生しました: ${node.name}`, fallbackError);
                     }
-                    catch (e) { }
-                    try {
-                        if ('layoutGrow' in groupNode)
-                            nodeMetadata.layoutGrow = groupNode.layoutGrow;
-                    }
-                    catch (e) { }
-                    try {
-                        if ('effects' in groupNode)
-                            nodeMetadata.effects = groupNode.effects;
-                    }
-                    catch (e) { }
-                    try {
-                        if ('blendMode' in groupNode)
-                            nodeMetadata.blendMode = groupNode.blendMode;
-                    }
-                    catch (e) { }
-                    try {
-                        if ('opacity' in groupNode)
-                            nodeMetadata.opacity = groupNode.opacity;
-                    }
-                    catch (e) { }
-                    // グループ構造の情報を追加
-                    nodeMetadata.groupStructure = {
-                        id: groupNode.id,
-                        name: groupNode.name,
-                        children: ((_a = groupNode.children) === null || _a === void 0 ? void 0 : _a.map((child, index) => {
-                            var _a;
-                            const childInfo = {
-                                id: child.id,
-                                name: child.name,
-                                type: child.type,
-                                index: index,
-                                x: child.x - groupNode.x, // グループ内での相対位置
-                                y: child.y - groupNode.y,
-                                width: child.width,
-                                height: child.height,
-                                visible: child.visible,
-                                locked: child.locked,
-                                rotation: 'rotation' in child ? child.rotation : null,
-                                opacity: 'opacity' in child ? child.opacity : null,
-                                fills: 'fills' in child && child.fills ? child.fills : null,
-                                strokes: 'strokes' in child && child.strokes ? child.strokes : null,
-                                effects: 'effects' in child && child.effects ? child.effects : null,
-                                cornerRadius: child.type === 'RECTANGLE' ? child.cornerRadius : null,
-                                strokeWeight: 'strokeWeight' in child ? child.strokeWeight : null,
-                                strokeAlign: 'strokeAlign' in child ? child.strokeAlign : null,
-                                strokeCap: 'strokeCap' in child ? child.strokeCap : null,
-                                strokeJoin: 'strokeJoin' in child ? child.strokeJoin : null,
-                                dashPattern: 'dashPattern' in child ? child.dashPattern : null,
-                                // テキストノードの場合はテキスト情報も保存
-                                textContent: child.type === 'TEXT' ? child.characters : null,
-                                fontName: child.type === 'TEXT' ? child.fontName : null,
-                                fontSize: child.type === 'TEXT' ? child.fontSize : null,
-                                lineHeight: child.type === 'TEXT' ? child.lineHeight : null,
-                                letterSpacing: child.type === 'TEXT' ? child.letterSpacing : null,
-                                textAlignHorizontal: child.type === 'TEXT' ? child.textAlignHorizontal : null,
-                                textAlignVertical: child.type === 'TEXT' ? child.textAlignVertical : null,
-                                textAutoResize: child.type === 'TEXT' ? child.textAutoResize : null,
-                                textCase: child.type === 'TEXT' ? child.textCase : null,
-                                textDecoration: child.type === 'TEXT' ? child.textDecoration : null,
-                                paragraphIndent: child.type === 'TEXT' ? child.paragraphIndent : null,
-                                paragraphSpacing: child.type === 'TEXT' ? child.paragraphSpacing : null,
-                                textFills: child.type === 'TEXT' && 'fills' in child && child.fills ? child.fills : null,
-                                textStrokes: child.type === 'TEXT' && 'strokes' in child && child.strokes ? child.strokes : null,
-                                textEffects: child.type === 'TEXT' && 'effects' in child && child.effects ? child.effects : null,
-                                // クリッピングマスク情報
-                                clipsContent: 'clipsContent' in child ? child.clipsContent : null,
-                                // マスク情報
-                                isMask: 'isMask' in child ? child.isMask : null,
-                                // 追加の図形プロパティ
-                                pointCount: 'pointCount' in child ? child.pointCount : null,
-                                innerRadius: 'innerRadius' in child ? child.innerRadius : null,
-                                booleanOperation: 'booleanOperation' in child ? child.booleanOperation : null,
-                                // レイアウト関連のプロパティ
-                                layoutAlign: 'layoutAlign' in child ? child.layoutAlign : null,
-                                layoutGrow: 'layoutGrow' in child ? child.layoutGrow : null,
-                                // ブレンドモード
-                                blendMode: 'blendMode' in child ? child.blendMode : null,
-                                // 制約情報
-                                constraints: 'constraints' in child ? child.constraints : null,
-                                // 変換情報
-                                absoluteTransform: child.absoluteTransform,
-                                relativeTransform: child.relativeTransform
-                            };
-                            // 子ノードがグループの場合、その子ノード情報も保存
-                            if (child.type === 'GROUP') {
-                                const childGroup = child;
-                                // ネストしたグループも空でない場合のみ保存
-                                if (childGroup.children && childGroup.children.length > 0) {
-                                    childInfo.groupStructure = {
-                                        id: childGroup.id,
-                                        name: childGroup.name,
-                                        children: ((_a = childGroup.children) === null || _a === void 0 ? void 0 : _a.map((nestedChild, nestedIndex) => {
-                                            return {
-                                                id: nestedChild.id,
-                                                name: nestedChild.name,
-                                                type: nestedChild.type,
-                                                index: nestedIndex,
-                                                x: nestedChild.x - childGroup.x, // ネストしたグループ内での相対位置
-                                                y: nestedChild.y - childGroup.y,
-                                                width: nestedChild.width,
-                                                height: nestedChild.height,
-                                                visible: nestedChild.visible,
-                                                locked: nestedChild.locked,
-                                                rotation: 'rotation' in nestedChild ? nestedChild.rotation : null,
-                                                opacity: 'opacity' in nestedChild ? nestedChild.opacity : null,
-                                                fills: 'fills' in nestedChild && nestedChild.fills ? nestedChild.fills : null,
-                                                strokes: 'strokes' in nestedChild && nestedChild.strokes ? nestedChild.strokes : null,
-                                                effects: 'effects' in nestedChild && nestedChild.effects ? nestedChild.effects : null,
-                                                cornerRadius: nestedChild.type === 'RECTANGLE' ? nestedChild.cornerRadius : null,
-                                                strokeWeight: 'strokeWeight' in nestedChild ? nestedChild.strokeWeight : null,
-                                                strokeAlign: 'strokeAlign' in nestedChild ? nestedChild.strokeAlign : null,
-                                                strokeCap: 'strokeCap' in nestedChild ? nestedChild.strokeCap : null,
-                                                strokeJoin: 'strokeJoin' in nestedChild ? nestedChild.strokeJoin : null,
-                                                dashPattern: 'dashPattern' in nestedChild ? nestedChild.dashPattern : null,
-                                                // テキストノードの場合はテキスト情報も保存
-                                                textContent: nestedChild.type === 'TEXT' ? nestedChild.characters : null,
-                                                fontName: nestedChild.type === 'TEXT' ? nestedChild.fontName : null,
-                                                fontSize: nestedChild.type === 'TEXT' ? nestedChild.fontSize : null,
-                                                lineHeight: nestedChild.type === 'TEXT' ? nestedChild.lineHeight : null,
-                                                letterSpacing: nestedChild.type === 'TEXT' ? nestedChild.letterSpacing : null,
-                                                textAlignHorizontal: nestedChild.type === 'TEXT' ? nestedChild.textAlignHorizontal : null,
-                                                textAlignVertical: nestedChild.type === 'TEXT' ? nestedChild.textAlignVertical : null,
-                                                textAutoResize: nestedChild.type === 'TEXT' ? nestedChild.textAutoResize : null,
-                                                textCase: nestedChild.type === 'TEXT' ? nestedChild.textCase : null,
-                                                textDecoration: nestedChild.type === 'TEXT' ? nestedChild.textDecoration : null,
-                                                paragraphIndent: nestedChild.type === 'TEXT' ? nestedChild.paragraphIndent : null,
-                                                paragraphSpacing: nestedChild.type === 'TEXT' ? nestedChild.paragraphSpacing : null,
-                                                textFills: nestedChild.type === 'TEXT' && 'fills' in nestedChild && nestedChild.fills ? nestedChild.fills : null,
-                                                textStrokes: nestedChild.type === 'TEXT' && 'strokes' in nestedChild && nestedChild.strokes ? nestedChild.strokes : null,
-                                                textEffects: nestedChild.type === 'TEXT' && 'effects' in nestedChild && nestedChild.effects ? nestedChild.effects : null,
-                                                // クリッピングマスク情報
-                                                clipsContent: 'clipsContent' in nestedChild ? nestedChild.clipsContent : null,
-                                                // 追加の図形プロパティ
-                                                pointCount: 'pointCount' in nestedChild ? nestedChild.pointCount : null,
-                                                innerRadius: 'innerRadius' in nestedChild ? nestedChild.innerRadius : null,
-                                                booleanOperation: 'booleanOperation' in nestedChild ? nestedChild.booleanOperation : null,
-                                                // レイアウト関連のプロパティ
-                                                layoutAlign: 'layoutAlign' in nestedChild ? nestedChild.layoutAlign : null,
-                                                layoutGrow: 'layoutGrow' in nestedChild ? nestedChild.layoutGrow : null,
-                                                // ブレンドモード
-                                                blendMode: 'blendMode' in nestedChild ? nestedChild.blendMode : null,
-                                                // 制約情報
-                                                constraints: 'constraints' in nestedChild ? nestedChild.constraints : null,
-                                                // 変換情報
-                                                absoluteTransform: nestedChild.absoluteTransform,
-                                                relativeTransform: nestedChild.relativeTransform
-                                            };
-                                        })) || []
-                                    };
-                                }
-                                else {
-                                    // 空のネストしたグループは子要素として含めない
-                                    return null;
-                                }
-                            }
-                            return childInfo;
-                        }).filter(childInfo => childInfo !== null)) || [] // nullの要素を除外
-                    };
-                    // 子ノードのfillsにもファイル名を追加
-                    for (const childInfo of nodeMetadata.groupStructure.children) {
-                        if (childInfo.fills && Array.isArray(childInfo.fills)) {
-                            const imageFills = childInfo.fills.filter((fill) => fill.type === 'IMAGE');
-                            if (imageFills.length > 0) {
-                                // 子ノードのfillsにファイル名を追加
-                                childInfo.fills = childInfo.fills.map((fill) => {
-                                    if (fill.type === 'IMAGE') {
-                                        // 子ノードの名前からファイル名を生成
-                                        const childFileName = `${childInfo.name}.png`;
-                                        const imageFillWithFileName = Object.assign(Object.assign({}, fill), { fileName: childFileName });
-                                        return imageFillWithFileName;
-                                    }
-                                    return fill;
-                                });
-                            }
+                }
+            }
+            else {
+                // 単一スタイルの場合は通常通り保存
+                try {
+                    if (typeof textNode.fontSize === 'number')
+                        properties.fontSize = textNode.fontSize;
+                    if (textNode.fontName && typeof textNode.fontName === 'object')
+                        properties.fontName = textNode.fontName;
+                    if (textNode.fills && Array.isArray(textNode.fills))
+                        properties.fills = textNode.fills;
+                    if (textNode.strokes && Array.isArray(textNode.strokes))
+                        properties.strokes = textNode.strokes;
+                    if (typeof textNode.strokeWeight === 'number')
+                        properties.strokeWeight = textNode.strokeWeight;
+                    if (typeof textNode.textAlignHorizontal === 'string')
+                        properties.textAlignHorizontal = textNode.textAlignHorizontal;
+                    if (typeof textNode.textAlignVertical === 'string')
+                        properties.textAlignVertical = textNode.textAlignVertical;
+                    if (typeof textNode.lineHeight === 'number' || typeof textNode.lineHeight === 'object')
+                        properties.lineHeight = textNode.lineHeight;
+                    if (typeof textNode.letterSpacing === 'number' || typeof textNode.letterSpacing === 'object')
+                        properties.letterSpacing = textNode.letterSpacing;
+                }
+                catch (error) {
+                    console.warn(`単一スタイルのプロパティ設定中にエラーが発生しました: ${node.name}`, error);
+                }
+            }
+        }
+        // 図形ノードの処理
+        if (node.type === 'RECTANGLE' || node.type === 'ELLIPSE' ||
+            node.type === 'POLYGON' || node.type === 'STAR' ||
+            node.type === 'VECTOR' || node.type === 'LINE') {
+            properties.fills = node.fills;
+            properties.strokes = node.strokes;
+            properties.strokeWeight = node.strokeWeight;
+            properties.cornerRadius = 'cornerRadius' in node ? node.cornerRadius : undefined;
+        }
+        // フレームの処理
+        if (node.type === 'FRAME') {
+            properties.backgrounds = node.backgrounds;
+            properties.layoutMode = node.layoutMode;
+            properties.paddingLeft = node.paddingLeft;
+            properties.paddingRight = node.paddingRight;
+            properties.paddingTop = node.paddingTop;
+            properties.paddingBottom = node.paddingBottom;
+            properties.itemSpacing = node.itemSpacing;
+        }
+        // グループの処理
+        if (node.type === 'GROUP') {
+            // グループの特別な処理は必要に応じて追加
+        }
+        // マスクの処理
+        if (node.type === 'BOOLEAN_OPERATION') {
+            properties.booleanOperation = node.booleanOperation;
+        }
+        return properties;
+    }
+    // 画像ノードの処理
+    processImageNode(node) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const images = {};
+                let designNode = this.serializeNode(node);
+                // 現在のノードの画像を処理
+                yield this.processNodeImages(node, designNode, images);
+                // 子ノードの画像を再帰的に処理
+                if ('children' in node && node.children) {
+                    for (const child of node.children) {
+                        try {
+                            const childImages = yield this.processImageNode(child);
+                            Object.assign(images, childImages.images);
                         }
-                    }
-                    return {
-                        name: groupNode.name || 'unnamed',
-                        metadata: nodeMetadata,
-                        bytes: null
-                    };
-                }
-                // シンボルやコンポーネントインスタンスの場合は特別処理
-                const nodeType = node.type;
-                if (nodeType === 'INSTANCE' || nodeType === 'COMPONENT') {
-                    const nodeMetadata = {
-                        id: node.id,
-                        name: node.name,
-                        type: nodeType,
-                        x: node.x,
-                        y: node.y,
-                        width: node.width,
-                        height: node.height,
-                        visible: node.visible,
-                        locked: node.locked,
-                        isSymbol: true,
-                        symbolType: nodeType,
-                        folderType: null,
-                        fileExtension: null,
-                        hasImageFile: false
-                    };
-                    // シンボルの基本情報のみ保存
-                    if (nodeType === 'INSTANCE') {
-                        const instanceNode = node;
-                        nodeMetadata.mainComponent = instanceNode.mainComponent ? {
-                            id: instanceNode.mainComponent.id,
-                            name: instanceNode.mainComponent.name
-                        } : null;
-                    }
-                    return {
-                        name: node.name || 'unnamed',
-                        metadata: nodeMetadata,
-                        bytes: null
-                    };
-                }
-                const nodeMetadata = {
-                    id: node.id,
-                    name: node.name,
-                    type: node.type,
-                    x: node.x,
-                    y: node.y,
-                    width: node.width,
-                    height: node.height,
-                    visible: node.visible,
-                    locked: node.locked
-                };
-                // 安全にプロパティを追加
-                try {
-                    if ('rotation' in node)
-                        nodeMetadata.rotation = node.rotation;
-                }
-                catch (e) { }
-                try {
-                    if ('constraints' in node)
-                        nodeMetadata.constraints = node.constraints;
-                }
-                catch (e) { }
-                try {
-                    if ('layoutAlign' in node)
-                        nodeMetadata.layoutAlign = node.layoutAlign;
-                }
-                catch (e) { }
-                try {
-                    if ('layoutGrow' in node)
-                        nodeMetadata.layoutGrow = node.layoutGrow;
-                }
-                catch (e) { }
-                try {
-                    if ('cornerRadius' in node)
-                        nodeMetadata.cornerRadius = node.cornerRadius;
-                }
-                catch (e) { }
-                try {
-                    if ('strokeWeight' in node)
-                        nodeMetadata.strokeWeight = node.strokeWeight;
-                }
-                catch (e) { }
-                try {
-                    if ('strokeAlign' in node)
-                        nodeMetadata.strokeAlign = node.strokeAlign;
-                }
-                catch (e) { }
-                try {
-                    if ('strokeCap' in node)
-                        nodeMetadata.strokeCap = node.strokeCap;
-                }
-                catch (e) { }
-                try {
-                    if ('strokeJoin' in node)
-                        nodeMetadata.strokeJoin = node.strokeJoin;
-                }
-                catch (e) { }
-                try {
-                    if ('dashPattern' in node)
-                        nodeMetadata.dashPattern = node.dashPattern;
-                }
-                catch (e) { }
-                try {
-                    if ('pointCount' in node)
-                        nodeMetadata.pointCount = node.pointCount;
-                }
-                catch (e) { }
-                try {
-                    if ('innerRadius' in node)
-                        nodeMetadata.innerRadius = node.innerRadius;
-                }
-                catch (e) { }
-                try {
-                    if ('booleanOperation' in node)
-                        nodeMetadata.booleanOperation = node.booleanOperation;
-                }
-                catch (e) { }
-                try {
-                    if ('blendMode' in node)
-                        nodeMetadata.blendMode = node.blendMode;
-                }
-                catch (e) { }
-                try {
-                    if ('opacity' in node)
-                        nodeMetadata.opacity = node.opacity;
-                }
-                catch (e) { }
-                try {
-                    if ('clipsContent' in node) {
-                        nodeMetadata.clipsContent = node.clipsContent;
-                        // クリッピングマスクの詳細情報を保存
-                        if (node.clipsContent && node.parent) {
-                            nodeMetadata.clippingMask = {
-                                enabled: node.clipsContent,
-                                parentId: node.parent.id,
-                                parentName: node.parent.name,
-                                parentType: node.parent.type,
-                                // マスクの形状情報（親ノードの形状に基づく）
-                                maskShape: {
-                                    type: node.parent.type,
-                                    width: 'width' in node.parent ? node.parent.width : null,
-                                    height: 'height' in node.parent ? node.parent.height : null,
-                                    x: 'x' in node.parent ? node.parent.x : null,
-                                    y: 'y' in node.parent ? node.parent.y : null,
-                                    cornerRadius: node.parent.type === 'RECTANGLE' ? node.parent.cornerRadius : null,
-                                    // 楕円の場合は特別な処理
-                                    isEllipse: node.parent.type === 'ELLIPSE'
-                                }
-                            };
+                        catch (error) {
+                            console.error(`子ノード処理中にエラーが発生しました: ${child.name}`, error);
                         }
                     }
                 }
-                catch (e) { }
-                try {
-                    if ('layoutMode' in node)
-                        nodeMetadata.layoutMode = node.layoutMode;
-                }
-                catch (e) { }
-                try {
-                    if ('paddingLeft' in node)
-                        nodeMetadata.paddingLeft = node.paddingLeft;
-                }
-                catch (e) { }
-                try {
-                    if ('paddingRight' in node)
-                        nodeMetadata.paddingRight = node.paddingRight;
-                }
-                catch (e) { }
-                try {
-                    if ('paddingTop' in node)
-                        nodeMetadata.paddingTop = node.paddingTop;
-                }
-                catch (e) { }
-                try {
-                    if ('paddingBottom' in node)
-                        nodeMetadata.paddingBottom = node.paddingBottom;
-                }
-                catch (e) { }
-                try {
-                    if ('itemSpacing' in node)
-                        nodeMetadata.itemSpacing = node.itemSpacing;
-                }
-                catch (e) { }
-                try {
-                    if ('primaryAxisAlignItems' in node)
-                        nodeMetadata.primaryAxisAlignItems = node.primaryAxisAlignItems;
-                }
-                catch (e) { }
-                try {
-                    if ('counterAxisAlignItems' in node)
-                        nodeMetadata.counterAxisAlignItems = node.counterAxisAlignItems;
-                }
-                catch (e) { }
-                try {
-                    if ('layoutSizingHorizontal' in node)
-                        nodeMetadata.layoutSizingHorizontal = node.layoutSizingHorizontal;
-                }
-                catch (e) { }
-                try {
-                    if ('layoutSizingVertical' in node)
-                        nodeMetadata.layoutSizingVertical = node.layoutSizingVertical;
-                }
-                catch (e) { }
-                // 変換情報（安全に処理）
-                try {
-                    nodeMetadata.absoluteTransform = node.absoluteTransform;
-                    nodeMetadata.relativeTransform = node.relativeTransform;
-                }
-                catch (e) { }
-                // 塗りつぶし情報（安全に処理）
-                try {
-                    if ('fills' in node && node.fills && Array.isArray(node.fills)) {
-                        nodeMetadata.fills = node.fills.map(fill => {
-                            const fillInfo = {
-                                type: fill.type,
-                                visible: fill.visible,
-                                opacity: fill.opacity
-                            };
-                            if (fill.type === 'SOLID') {
-                                fillInfo.color = fill.color;
-                            }
-                            else if (fill.type === 'GRADIENT_LINEAR' || fill.type === 'GRADIENT_RADIAL') {
-                                fillInfo.type = fill.type;
-                                fillInfo.visible = fill.visible;
-                                fillInfo.opacity = fill.opacity;
-                            }
-                            return fillInfo;
-                        });
-                    }
-                }
-                catch (e) {
-                    console.warn(`Failed to process fills for node: ${node.name}`);
-                }
-                // ストローク情報（安全に処理）
-                try {
-                    if ('strokes' in node && node.strokes && Array.isArray(node.strokes)) {
-                        nodeMetadata.strokes = node.strokes.map(stroke => {
-                            const strokeInfo = {
-                                type: stroke.type,
-                                visible: stroke.visible,
-                                opacity: stroke.opacity
-                            };
-                            if (stroke.type === 'SOLID') {
-                                strokeInfo.color = stroke.color;
-                            }
-                            if ('weight' in stroke) {
-                                strokeInfo.weight = stroke.weight;
-                            }
-                            if ('align' in stroke) {
-                                strokeInfo.align = stroke.align;
-                            }
-                            if ('dashPattern' in stroke) {
-                                strokeInfo.dashPattern = stroke.dashPattern;
-                            }
-                            return strokeInfo;
-                        });
-                    }
-                }
-                catch (e) {
-                    console.warn(`Failed to process strokes for node: ${node.name}`);
-                }
-                // エフェクト情報（安全に処理）
-                try {
-                    if ('effects' in node && node.effects && Array.isArray(node.effects)) {
-                        nodeMetadata.effects = node.effects.map(effect => ({
-                            type: effect.type,
-                            visible: effect.visible,
-                            radius: effect.radius,
-                            color: effect.color,
-                            offset: effect.offset,
-                            spread: effect.spread,
-                            blendMode: effect.blendMode
-                        }));
-                    }
-                }
-                catch (e) {
-                    console.warn(`Failed to process effects for node: ${node.name}`);
-                }
-                // グループ化されたノードの情報を追加
-                if (node.parent && node.parent.type === 'GROUP') {
-                    nodeMetadata.isInGroup = true;
-                    nodeMetadata.groupId = node.parent.id;
-                    nodeMetadata.groupName = node.parent.name;
-                    nodeMetadata.groupIndex = ((_b = node.parent.children) === null || _b === void 0 ? void 0 : _b.indexOf(node)) || 0;
-                }
-                // フレーム内のノードの情報を追加
-                if (node.parent && node.parent.type === 'FRAME') {
-                    nodeMetadata.isInFrame = true;
-                    nodeMetadata.frameId = node.parent.id;
-                    nodeMetadata.frameName = node.parent.name;
-                    nodeMetadata.frameIndex = ((_c = node.parent.children) === null || _c === void 0 ? void 0 : _c.indexOf(node)) || 0;
-                }
-                // コンポーネント内のノードの情報を追加
-                if (node.parent && node.parent.type === 'COMPONENT') {
-                    nodeMetadata.isInComponent = true;
-                    nodeMetadata.componentId = node.parent.id;
-                    nodeMetadata.componentName = node.parent.name;
-                    nodeMetadata.componentIndex = ((_d = node.parent.children) === null || _d === void 0 ? void 0 : _d.indexOf(node)) || 0;
-                }
-                // グループノードの場合は特別処理（既に上で処理済み）
-                // フレームノードの場合、フレーム構造の情報を追加
-                if (node.type === 'FRAME') {
-                    const frameNode = node;
-                    nodeMetadata.frameStructure = {
-                        id: frameNode.id,
-                        name: frameNode.name,
-                        children: ((_e = frameNode.children) === null || _e === void 0 ? void 0 : _e.map((child, index) => {
-                            var _a;
-                            const childInfo = {
-                                id: child.id,
-                                name: child.name,
-                                type: child.type,
-                                index: index,
-                                x: child.x - frameNode.x, // フレーム内での相対位置
-                                y: child.y - frameNode.y,
-                                width: child.width,
-                                height: child.height,
-                                visible: child.visible,
-                                locked: child.locked,
-                                rotation: 'rotation' in child ? child.rotation : null,
-                                opacity: 'opacity' in child ? child.opacity : null,
-                                fills: 'fills' in child && child.fills ? child.fills : null,
-                                strokes: 'strokes' in child && child.strokes ? child.strokes : null,
-                                effects: 'effects' in child && child.effects ? child.effects : null,
-                                cornerRadius: child.type === 'RECTANGLE' ? child.cornerRadius : null,
-                                strokeWeight: 'strokeWeight' in child ? child.strokeWeight : null,
-                                strokeAlign: 'strokeAlign' in child ? child.strokeAlign : null,
-                                strokeCap: 'strokeCap' in child ? child.strokeCap : null,
-                                strokeJoin: 'strokeJoin' in child ? child.strokeJoin : null,
-                                dashPattern: 'dashPattern' in child ? child.dashPattern : null,
-                                // テキストノードの場合はテキスト情報も保存
-                                textContent: child.type === 'TEXT' ? child.characters : null,
-                                fontName: child.type === 'TEXT' ? child.fontName : null,
-                                fontSize: child.type === 'TEXT' ? child.fontSize : null,
-                                lineHeight: child.type === 'TEXT' ? child.lineHeight : null,
-                                letterSpacing: child.type === 'TEXT' ? child.letterSpacing : null,
-                                textAlignHorizontal: child.type === 'TEXT' ? child.textAlignHorizontal : null,
-                                textAlignVertical: child.type === 'TEXT' ? child.textAlignVertical : null,
-                                textAutoResize: child.type === 'TEXT' ? child.textAutoResize : null,
-                                textCase: child.type === 'TEXT' ? child.textCase : null,
-                                textDecoration: child.type === 'TEXT' ? child.textDecoration : null,
-                                paragraphIndent: child.type === 'TEXT' ? child.paragraphIndent : null,
-                                paragraphSpacing: child.type === 'TEXT' ? child.paragraphSpacing : null,
-                                textFills: child.type === 'TEXT' && 'fills' in child && child.fills ? child.fills : null,
-                                textStrokes: child.type === 'TEXT' && 'strokes' in child && child.strokes ? child.strokes : null,
-                                textEffects: child.type === 'TEXT' && 'effects' in child && child.effects ? child.effects : null,
-                                // クリッピングマスク情報
-                                clipsContent: 'clipsContent' in child ? child.clipsContent : null,
-                                // マスク情報
-                                isMask: 'isMask' in child ? child.isMask : null,
-                                // 追加の図形プロパティ
-                                pointCount: 'pointCount' in child ? child.pointCount : null,
-                                innerRadius: 'innerRadius' in child ? child.innerRadius : null,
-                                booleanOperation: 'booleanOperation' in child ? child.booleanOperation : null,
-                                // レイアウト関連のプロパティ
-                                layoutAlign: 'layoutAlign' in child ? child.layoutAlign : null,
-                                layoutGrow: 'layoutGrow' in child ? child.layoutGrow : null,
-                                // ブレンドモード
-                                blendMode: 'blendMode' in child ? child.blendMode : null,
-                                // 制約情報
-                                constraints: 'constraints' in child ? child.constraints : null,
-                                // 変換情報
-                                absoluteTransform: child.absoluteTransform,
-                                relativeTransform: child.relativeTransform
-                            };
-                            // 子ノードがグループの場合、その子ノード情報も保存
-                            if (child.type === 'GROUP') {
-                                const childGroup = child;
-                                // ネストしたグループも空でない場合のみ保存
-                                if (childGroup.children && childGroup.children.length > 0) {
-                                    childInfo.groupStructure = {
-                                        id: childGroup.id,
-                                        name: childGroup.name,
-                                        children: ((_a = childGroup.children) === null || _a === void 0 ? void 0 : _a.map((nestedChild, nestedIndex) => {
-                                            return {
-                                                id: nestedChild.id,
-                                                name: nestedChild.name,
-                                                type: nestedChild.type,
-                                                index: nestedIndex,
-                                                x: nestedChild.x - childGroup.x, // ネストしたグループ内での相対位置
-                                                y: nestedChild.y - childGroup.y,
-                                                width: nestedChild.width,
-                                                height: nestedChild.height,
-                                                visible: nestedChild.visible,
-                                                locked: nestedChild.locked,
-                                                rotation: 'rotation' in nestedChild ? nestedChild.rotation : null,
-                                                opacity: 'opacity' in nestedChild ? nestedChild.opacity : null,
-                                                fills: 'fills' in nestedChild && nestedChild.fills ? nestedChild.fills : null,
-                                                strokes: 'strokes' in nestedChild && nestedChild.strokes ? nestedChild.strokes : null,
-                                                effects: 'effects' in nestedChild && nestedChild.effects ? nestedChild.effects : null,
-                                                cornerRadius: nestedChild.type === 'RECTANGLE' ? nestedChild.cornerRadius : null,
-                                                strokeWeight: 'strokeWeight' in nestedChild ? nestedChild.strokeWeight : null,
-                                                strokeAlign: 'strokeAlign' in nestedChild ? nestedChild.strokeAlign : null,
-                                                strokeCap: 'strokeCap' in nestedChild ? nestedChild.strokeCap : null,
-                                                strokeJoin: 'strokeJoin' in nestedChild ? nestedChild.strokeJoin : null,
-                                                dashPattern: 'dashPattern' in nestedChild ? nestedChild.dashPattern : null,
-                                                // テキストノードの場合はテキスト情報も保存
-                                                textContent: nestedChild.type === 'TEXT' ? nestedChild.characters : null,
-                                                fontName: nestedChild.type === 'TEXT' ? nestedChild.fontName : null,
-                                                fontSize: nestedChild.type === 'TEXT' ? nestedChild.fontSize : null,
-                                                lineHeight: nestedChild.type === 'TEXT' ? nestedChild.lineHeight : null,
-                                                letterSpacing: nestedChild.type === 'TEXT' ? nestedChild.letterSpacing : null,
-                                                textAlignHorizontal: nestedChild.type === 'TEXT' ? nestedChild.textAlignHorizontal : null,
-                                                textAlignVertical: nestedChild.type === 'TEXT' ? nestedChild.textAlignVertical : null,
-                                                textAutoResize: nestedChild.type === 'TEXT' ? nestedChild.textAutoResize : null,
-                                                textCase: nestedChild.type === 'TEXT' ? nestedChild.textCase : null,
-                                                textDecoration: nestedChild.type === 'TEXT' ? nestedChild.textDecoration : null,
-                                                paragraphIndent: nestedChild.type === 'TEXT' ? nestedChild.paragraphIndent : null,
-                                                paragraphSpacing: nestedChild.type === 'TEXT' ? nestedChild.paragraphSpacing : null,
-                                                textFills: nestedChild.type === 'TEXT' && 'fills' in nestedChild && nestedChild.fills ? nestedChild.fills : null,
-                                                textStrokes: nestedChild.type === 'TEXT' && 'strokes' in nestedChild && nestedChild.strokes ? nestedChild.strokes : null,
-                                                textEffects: nestedChild.type === 'TEXT' && 'effects' in nestedChild && nestedChild.effects ? nestedChild.effects : null,
-                                                // クリッピングマスク情報
-                                                clipsContent: 'clipsContent' in nestedChild ? nestedChild.clipsContent : null,
-                                                // 追加の図形プロパティ
-                                                pointCount: 'pointCount' in nestedChild ? nestedChild.pointCount : null,
-                                                innerRadius: 'innerRadius' in nestedChild ? nestedChild.innerRadius : null,
-                                                booleanOperation: 'booleanOperation' in nestedChild ? nestedChild.booleanOperation : null,
-                                                // レイアウト関連のプロパティ
-                                                layoutAlign: 'layoutAlign' in nestedChild ? nestedChild.layoutAlign : null,
-                                                layoutGrow: 'layoutGrow' in nestedChild ? nestedChild.layoutGrow : null,
-                                                // ブレンドモード
-                                                blendMode: 'blendMode' in nestedChild ? nestedChild.blendMode : null,
-                                                // 制約情報
-                                                constraints: 'constraints' in nestedChild ? nestedChild.constraints : null,
-                                                // 変換情報
-                                                absoluteTransform: nestedChild.absoluteTransform,
-                                                relativeTransform: nestedChild.relativeTransform
-                                            };
-                                        })) || []
-                                    };
-                                }
-                                else {
-                                    // 空のネストしたグループは子要素として含めない
-                                    return null;
-                                }
-                            }
-                            return childInfo;
-                        }).filter(childInfo => childInfo !== null)) || [] // nullの要素を除外
-                    };
-                }
-                // ノードタイプに応じてフォルダとパスを決定
-                let folderType = 'img';
-                let fileExtension = 'png';
-                let bytes = null;
-                // グループノードの場合は特別処理済みなのでスキップ
-                if (node.type === 'GROUP') {
-                    // グループは既に特別処理済み
-                    return {
-                        name: node.name || 'unnamed',
-                        metadata: nodeMetadata,
-                        bytes: null
-                    };
-                }
-                // フレームの場合、画像を含むかどうかをチェック
-                if (node.type === 'FRAME') {
-                    const hasImage = hasImageInFrame(node);
-                    const imageNodes = getImageNodesInFrame(node);
-                    nodeMetadata.hasImage = hasImage;
-                    nodeMetadata.imageNodeCount = imageNodes.length;
-                    nodeMetadata.imageNodes = imageNodes.map(imgNode => ({
-                        id: imgNode.id,
-                        name: imgNode.name,
-                        type: imgNode.type,
-                        // 画像ファイルのパスを追加（実際のノード名を使用）
-                        imagePath: `img/${imgNode.name || 'unnamed'}.png`,
-                        hasImageFile: true,
-                        imageFileName: `${imgNode.name || 'unnamed'}.png`
-                    }));
-                    // フレームは写真を出力しない
-                    bytes = null;
-                    folderType = null;
-                    fileExtension = null;
-                }
-                else {
-                    // シンボルやコンポーネントインスタンスの処理
-                    const nodeType = node.type;
-                    if (nodeType === 'INSTANCE' || nodeType === 'COMPONENT') {
-                        // シンボルやコンポーネントは直接エクスポートできないため、スキップ
-                        folderType = null;
-                        fileExtension = null;
-                        bytes = null;
-                        nodeMetadata.isSymbol = true;
-                        nodeMetadata.symbolType = nodeType;
-                        // シンボルの基本情報のみ保存
-                        if (nodeType === 'INSTANCE') {
-                            const instanceNode = node;
-                            nodeMetadata.mainComponent = instanceNode.mainComponent ? {
-                                id: instanceNode.mainComponent.id,
-                                name: instanceNode.mainComponent.name
-                            } : null;
-                        }
-                    }
-                    else {
-                        // 画像フィルを持つノードを画像として識別
-                        if ('fills' in node && node.fills && Array.isArray(node.fills)) {
-                            const imageFills = node.fills.filter(fill => fill.type === 'IMAGE' && fill.visible !== false);
-                            if (imageFills.length > 0) {
-                                folderType = 'img';
-                                fileExtension = 'png';
-                                nodeMetadata.hasImageFill = true;
-                                nodeMetadata.imageFillCount = imageFills.length;
-                                // 画像データを抽出（シンボルでない場合のみ）
-                                try {
-                                    if ('exportAsync' in node) {
-                                        bytes = yield node.exportAsync(exportSettings);
-                                    }
-                                }
-                                catch (error) {
-                                    const errorMessage = error instanceof Error ? error.message : String(error);
-                                    console.warn(`Failed to export node ${node.name}: ${errorMessage}`);
-                                    bytes = null;
-                                }
-                                // 画像フィルの情報をメタデータに追加
-                                nodeMetadata.imageFills = imageFills.map(fill => ({
-                                    type: fill.type,
-                                    visible: fill.visible,
-                                    opacity: fill.opacity
-                                }));
-                            }
-                        }
-                        // 画像ハッシュを持つノードを画像として識別
-                        if ('imageHash' in node && node.imageHash) {
-                            folderType = 'img';
-                            fileExtension = 'png';
-                            nodeMetadata.imageHash = node.imageHash;
-                            // 画像データを抽出（シンボルでない場合のみ）
+                return { node: designNode, images };
+            }
+            catch (error) {
+                console.error(`processImageNodeでエラーが発生しました: ${node.name}`, error);
+                // エラーが発生した場合でも基本的なノード情報は返す
+                const designNode = this.serializeNode(node);
+                return { node: designNode, images: {} };
+            }
+        });
+    }
+    // 個別ノードの画像を処理
+    processNodeImages(node, designNode, images) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                // 塗り（fills）の画像を処理
+                if ('fills' in node && node.fills && Array.isArray(node.fills)) {
+                    const fills = node.fills;
+                    for (const fill of fills) {
+                        if (fill.type === 'IMAGE' && fill.imageHash) {
                             try {
-                                if ('exportAsync' in node) {
-                                    bytes = yield node.exportAsync(exportSettings);
+                                const image = figma.getImageByHash(fill.imageHash);
+                                if (image) {
+                                    const imageBytes = yield image.getBytesAsync();
+                                    const imageName = `img/image_${this.imageCounter}.png`;
+                                    const base64Data = this.arrayBufferToBase64(imageBytes);
+                                    images[imageName] = base64Data;
+                                    designNode.imageData = imageName;
+                                    this.imageCounter++;
+                                    console.log(`画像を処理しました: ${imageName} (ノード: ${node.name}, サイズ: ${imageBytes.byteLength} bytes)`);
                                 }
                             }
                             catch (error) {
-                                const errorMessage = error instanceof Error ? error.message : String(error);
-                                console.warn(`Failed to export node ${node.name}: ${errorMessage}`);
-                                bytes = null;
+                                console.error(`画像の処理中にエラーが発生しました (ノード: ${node.name}):`, error);
                             }
                         }
                     }
                 }
-                nodeMetadata.folderType = folderType;
-                nodeMetadata.fileExtension = fileExtension;
-                // 画像ファイルがある場合のみ画像パスを設定
-                if (folderType && fileExtension) {
-                    nodeMetadata.imagePath = `${folderType}/${node.name || 'unnamed'}.${fileExtension}`;
-                }
-                // 画像ファイルの情報を追加
-                if (bytes) {
-                    nodeMetadata.hasImageFile = true;
-                    nodeMetadata.imageFileName = `${node.name || 'unnamed'}.${fileExtension}`;
-                    nodeMetadata.imageFileSize = bytes.length;
-                }
-                else {
-                    nodeMetadata.hasImageFile = false;
-                }
-                // 画像フィルがある場合は、ファイル名も保存
-                if (nodeMetadata.fills && Array.isArray(nodeMetadata.fills)) {
-                    const imageFills = nodeMetadata.fills.filter((fill) => fill.type === 'IMAGE');
-                    if (imageFills.length > 0) {
-                        // 画像フィルにファイル名を追加
-                        nodeMetadata.fills = nodeMetadata.fills.map((fill) => {
-                            if (fill.type === 'IMAGE') {
-                                const imageFillWithFileName = Object.assign(Object.assign({}, fill), { fileName: nodeMetadata.imageFileName });
-                                return imageFillWithFileName;
+                // 線（strokes）の画像を処理
+                if ('strokes' in node && node.strokes && Array.isArray(node.strokes)) {
+                    const strokes = node.strokes;
+                    for (const stroke of strokes) {
+                        if (stroke.type === 'IMAGE' && stroke.imageHash) {
+                            try {
+                                const image = figma.getImageByHash(stroke.imageHash);
+                                if (image) {
+                                    const imageBytes = yield image.getBytesAsync();
+                                    const imageName = `img/image_${this.imageCounter}.png`;
+                                    const base64Data = this.arrayBufferToBase64(imageBytes);
+                                    images[imageName] = base64Data;
+                                    designNode.imageData = imageName;
+                                    this.imageCounter++;
+                                    console.log(`画像を処理しました: ${imageName} (ノード: ${node.name}, サイズ: ${imageBytes.byteLength} bytes)`);
+                                }
                             }
-                            return fill;
-                        });
+                            catch (error) {
+                                console.error(`画像の処理中にエラーが発生しました (ノード: ${node.name}):`, error);
+                            }
+                        }
                     }
                 }
-                // 親ノードの情報も含める（インポート時の配置に必要）
-                if (node.parent && 'name' in node.parent) {
-                    nodeMetadata.parentName = node.parent.name;
+                // 効果（effects）の画像を処理
+                if ('effects' in node && node.effects && Array.isArray(node.effects)) {
+                    for (const effect of node.effects) {
+                        if (effect.type === 'DROP_SHADOW' && effect.color) {
+                            // ドロップシャドウの画像処理（必要に応じて）
+                        }
+                    }
                 }
-                // ノードタイプに応じた追加情報
-                if (node.type === 'FRAME' || node.type === 'GROUP') {
-                    nodeMetadata.children = (_f = node.children) === null || _f === void 0 ? void 0 : _f.map(child => ({
-                        id: child.id,
-                        name: child.name,
-                        type: child.type
-                    }));
+                // 背景（backgrounds）の画像を処理（フレーム用）
+                if ('backgrounds' in node && node.backgrounds && Array.isArray(node.backgrounds)) {
+                    const backgrounds = node.backgrounds;
+                    for (const background of backgrounds) {
+                        if (background.type === 'IMAGE' && background.imageHash) {
+                            try {
+                                const image = figma.getImageByHash(background.imageHash);
+                                if (image) {
+                                    const imageBytes = yield image.getBytesAsync();
+                                    const imageName = `img/image_${this.imageCounter}.png`;
+                                    const base64Data = this.arrayBufferToBase64(imageBytes);
+                                    images[imageName] = base64Data;
+                                    designNode.imageData = imageName;
+                                    this.imageCounter++;
+                                    console.log(`背景画像を処理しました: ${imageName} (ノード: ${node.name}, サイズ: ${imageBytes.byteLength} bytes)`);
+                                }
+                            }
+                            catch (error) {
+                                console.error(`背景画像の処理中にエラーが発生しました (ノード: ${node.name}):`, error);
+                            }
+                        }
+                    }
                 }
-                return {
-                    name: node.name || 'unnamed',
-                    metadata: nodeMetadata,
-                    bytes: bytes
-                };
             }
             catch (error) {
-                console.error(`Failed to export node: ${node.name}`, error);
-                return null; // エラーが発生した場合はnullを返す
+                console.error(`processNodeImagesでエラーが発生しました: ${node.name}`, error);
             }
-        })));
-        const validResults = results.filter(result => result !== null);
-        if (validResults.length === 0) {
-            throw new Error('エクスポート可能なノードがありません');
-        }
-        // フレームやグループ内の画像ノードを個別に処理
-        const additionalImageNodes = [];
-        for (const result of validResults) {
-            // フレーム内の画像ノードを処理
-            if (result.metadata.imageNodes && Array.isArray(result.metadata.imageNodes)) {
-                for (const imageNodeInfo of result.metadata.imageNodes) {
-                    // 実際の画像ノードを取得
-                    const imageNode = figma.getNodeById(imageNodeInfo.id);
-                    if (imageNode && 'exportAsync' in imageNode && 'x' in imageNode) {
-                        // シンボルやコンポーネントインスタンスの場合はスキップ
-                        const imageNodeType = imageNode.type;
-                        if (imageNodeType === 'INSTANCE' || imageNodeType === 'COMPONENT') {
-                            continue;
-                        }
-                        try {
-                            const imageBytes = yield imageNode.exportAsync(exportSettings);
-                            const actualNodeName = imageNode.name || 'unnamed';
-                            additionalImageNodes.push({
-                                name: actualNodeName,
-                                metadata: {
-                                    id: imageNode.id,
-                                    name: actualNodeName,
-                                    type: imageNode.type,
-                                    x: imageNode.x,
-                                    y: imageNode.y,
-                                    width: imageNode.width,
-                                    height: imageNode.height,
-                                    visible: imageNode.visible,
-                                    locked: imageNode.locked,
-                                    folderType: 'img',
-                                    fileExtension: 'png',
-                                    imagePath: `img/${actualNodeName}.png`,
-                                    hasImageFile: true,
-                                    imageFileName: `${actualNodeName}.png`,
-                                    imageFileSize: imageBytes.length
-                                },
-                                bytes: imageBytes
-                            });
-                        }
-                        catch (error) {
-                            console.error(`Failed to export image node: ${imageNodeInfo.name}`, error);
-                            // エラーが発生した場合は、メタデータのみ保存
-                            const actualNodeName = imageNode.name || 'unnamed';
-                            additionalImageNodes.push({
-                                name: actualNodeName,
-                                metadata: {
-                                    id: imageNode.id,
-                                    name: actualNodeName,
-                                    type: imageNode.type,
-                                    x: imageNode.x,
-                                    y: imageNode.y,
-                                    width: imageNode.width,
-                                    height: imageNode.height,
-                                    visible: imageNode.visible,
-                                    locked: imageNode.locked,
-                                    folderType: 'img',
-                                    fileExtension: 'png',
-                                    imagePath: `img/${actualNodeName}.png`,
-                                    hasImageFile: false,
-                                    imageFileName: `${actualNodeName}.png`,
-                                    error: error instanceof Error ? error.message : String(error)
-                                },
-                                bytes: null
-                            });
-                        }
-                    }
-                }
-            }
-            // グループ内の画像ノードを処理
-            if (result.metadata.groupStructure && result.metadata.groupStructure.children) {
-                for (const childInfo of result.metadata.groupStructure.children) {
-                    // 子ノードが画像フィルを持つかチェック
-                    if (childInfo.fills && Array.isArray(childInfo.fills)) {
-                        const imageFills = childInfo.fills.filter((fill) => fill.type === 'IMAGE' && fill.visible !== false);
-                        if (imageFills.length > 0) {
-                            // 画像ノードとして処理
-                            const actualNodeName = childInfo.name || 'unnamed';
-                            additionalImageNodes.push({
-                                name: actualNodeName,
-                                metadata: {
-                                    id: childInfo.id,
-                                    name: actualNodeName,
-                                    type: childInfo.type,
-                                    x: childInfo.x,
-                                    y: childInfo.y,
-                                    width: childInfo.width,
-                                    height: childInfo.height,
-                                    visible: childInfo.visible,
-                                    locked: childInfo.locked,
-                                    folderType: 'img',
-                                    fileExtension: 'png',
-                                    imagePath: `img/${actualNodeName}.png`,
-                                    hasImageFile: true,
-                                    imageFileName: `${actualNodeName}.png`,
-                                    isInGroup: true,
-                                    groupId: result.metadata.id,
-                                    groupName: result.metadata.name,
-                                    imageFills: imageFills
-                                },
-                                bytes: null // グループ内の画像は後で処理
-                            });
-                        }
-                    }
-                    // ネストしたグループ内の画像ノードも処理
-                    if (childInfo.groupStructure && childInfo.groupStructure.children) {
-                        for (const nestedChildInfo of childInfo.groupStructure.children) {
-                            if (nestedChildInfo.fills && Array.isArray(nestedChildInfo.fills)) {
-                                const nestedImageFills = nestedChildInfo.fills.filter((fill) => fill.type === 'IMAGE' && fill.visible !== false);
-                                if (nestedImageFills.length > 0) {
-                                    const actualNodeName = nestedChildInfo.name || 'unnamed';
-                                    additionalImageNodes.push({
-                                        name: actualNodeName,
-                                        metadata: {
-                                            id: nestedChildInfo.id,
-                                            name: actualNodeName,
-                                            type: nestedChildInfo.type,
-                                            x: nestedChildInfo.x,
-                                            y: nestedChildInfo.y,
-                                            width: nestedChildInfo.width,
-                                            height: nestedChildInfo.height,
-                                            visible: nestedChildInfo.visible,
-                                            locked: nestedChildInfo.locked,
-                                            folderType: 'img',
-                                            fileExtension: 'png',
-                                            imagePath: `img/${actualNodeName}.png`,
-                                            hasImageFile: true,
-                                            imageFileName: `${actualNodeName}.png`,
-                                            isInNestedGroup: true,
-                                            parentGroupId: childInfo.id,
-                                            parentGroupName: childInfo.name,
-                                            groupId: result.metadata.id,
-                                            groupName: result.metadata.name,
-                                            imageFills: nestedImageFills
-                                        },
-                                        bytes: null // ネストしたグループ内の画像は後で処理
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        // エクスポートデータにメタデータを追加
-        const exportData = {
-            metadata: metadata,
-            nodes: [...validResults, ...additionalImageNodes]
-        };
-        figma.ui.postMessage({
-            type: 'export-data',
-            data: exportData
         });
-    });
-}
-// インポート機能
-function importFromZip(importData) {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            const { metadata, nodes } = importData;
-            const imageFiles = importData.imageFiles || [];
-            // データの存在チェック
-            if (!nodes || !Array.isArray(nodes)) {
-                throw new Error('インポートデータが無効です。nodesが配列ではありません。');
-            }
-            if (nodes.length === 0) {
-                throw new Error('インポートするノードがありません。');
-            }
-            // インポート開始を通知
-            figma.ui.postMessage({
-                type: 'import-progress',
-                message: 'インポートを開始しています...',
-                progress: 0
-            });
-            // 画像ファイルを処理
-            yield processImageFiles(imageFiles);
-            // IDマッピングを作成（元のID -> 新しいノード）
-            const idMapping = new Map();
-            // グループとフレームを先に作成（子ノードを持つノード）
-            const groupAndFrameNodes = nodes.filter(node => node.metadata.type === 'GROUP' || node.metadata.type === 'FRAME');
-            const otherNodes = nodes.filter(node => node.metadata.type !== 'GROUP' && node.metadata.type !== 'FRAME');
-            // グループとフレームを先に作成
-            for (const nodeData of groupAndFrameNodes) {
-                const nodeMetadata = nodeData.metadata;
-                let createdNode = null;
-                if (nodeMetadata.type === 'FRAME') {
-                    createdNode = yield createFrameFromMetadata(nodeMetadata);
-                }
-                else if (nodeMetadata.type === 'GROUP') {
-                    createdNode = yield createGroupFromMetadata(nodeMetadata);
-                    // グループが作成されなかった場合（空のグループ）はスキップ
-                    if (!createdNode) {
-                        continue;
+    }
+    // ArrayBufferをBase64に変換
+    arrayBufferToBase64(buffer) {
+        const bytes = new Uint8Array(buffer);
+        const base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+        let result = '';
+        let i = 0;
+        while (i < bytes.length) {
+            const byte1 = bytes[i++];
+            const byte2 = i < bytes.length ? bytes[i++] : 0;
+            const byte3 = i < bytes.length ? bytes[i++] : 0;
+            const enc1 = byte1 >> 2;
+            const enc2 = ((byte1 & 3) << 4) | (byte2 >> 4);
+            const enc3 = ((byte2 & 15) << 2) | (byte3 >> 6);
+            const enc4 = byte3 & 63;
+            result += base64Chars[enc1] + base64Chars[enc2] +
+                (i > bytes.length + 1 ? '=' : base64Chars[enc3]) +
+                (i > bytes.length ? '=' : base64Chars[enc4]);
+        }
+        return result;
+    }
+    // エクスポート実行
+    exportDesign(target) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                console.log('エクスポート開始:', target);
+                let nodes = [];
+                if (target === 'selected') {
+                    nodes = figma.currentPage.selection;
+                    if (nodes.length === 0) {
+                        throw new Error('エクスポート対象のノードが選択されていません');
                     }
-                }
-                // 作成されたノードをIDマッピングに追加
-                if (createdNode) {
-                    idMapping.set(nodeMetadata.id, createdNode);
                 }
                 else {
-                    console.warn(`Failed to create group/frame node: ${nodeMetadata.name} (${nodeMetadata.type})`);
+                    nodes = figma.currentPage.children;
                 }
-            }
-            // その他のノードを作成
-            for (const nodeData of otherNodes) {
-                const nodeMetadata = nodeData.metadata;
-                let createdNode = null;
-                if (nodeMetadata.type === 'TEXT') {
-                    createdNode = yield createTextFromMetadata(nodeMetadata);
-                }
-                else if (nodeMetadata.type === 'RECTANGLE' || nodeMetadata.type === 'ELLIPSE' || nodeMetadata.type === 'POLYGON' || nodeMetadata.type === 'STAR' || nodeMetadata.type === 'VECTOR') {
-                    createdNode = yield createShapeFromMetadata(nodeMetadata);
-                }
-                else if (nodeMetadata.type === 'LINE' || nodeMetadata.type === 'ARC' || nodeMetadata.type === 'BOOLEAN_OPERATION' || nodeMetadata.type === 'SLICE' || nodeMetadata.type === 'INSTANCE' || nodeMetadata.type === 'COMPONENT') {
-                    createdNode = yield createShapeFromMetadata(nodeMetadata);
-                }
-                // 作成されたノードをIDマッピングに追加
-                if (createdNode) {
-                    idMapping.set(nodeMetadata.id, createdNode);
-                }
-                else {
-                    console.warn(`Failed to create other node: ${nodeMetadata.name} (${nodeMetadata.type})`);
-                }
-            }
-            // 子ノードの配置を処理（フレームのみ、グループは既に処理済み）
-            yield processChildNodes(nodes, idMapping);
-            // インポート完了を通知
-            figma.ui.postMessage({
-                type: 'import-complete',
-                message: 'インポートが完了しました',
-                importedCount: nodes.length
-            });
-        }
-        catch (error) {
-            console.error('Import error:', error);
-            figma.ui.postMessage({
-                type: 'error',
-                message: `インポートエラー: ${error.message || String(error)}`
-            });
-        }
-    });
-}
-// 画像ファイルを処理する関数
-function processImageFiles(imageFiles) {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            // 画像ファイル名と画像データのマッピングを作成
-            const imageDataMapping = {};
-            const imageHashMapping = {};
-            // 画像ファイルをFigmaにアップロード
-            for (const imageFile of imageFiles) {
-                try {
-                    if (imageFile.data && imageFile.data.length > 0) {
-                        // ArrayBufferをUint8Arrayに変換
-                        let imageData;
-                        if (imageFile.data instanceof ArrayBuffer) {
-                            imageData = new Uint8Array(imageFile.data);
-                        }
-                        else if (Array.isArray(imageFile.data)) {
-                            imageData = new Uint8Array(imageFile.data);
-                        }
-                        else {
-                            console.error(`Unknown data type for ${imageFile.fileName}:`, typeof imageFile.data);
-                            continue;
-                        }
-                        // 画像データを保存
-                        imageDataMapping[imageFile.fileName] = imageData;
-                        // 画像をFigmaにアップロードしてハッシュも取得
-                        const image = yield figma.createImage(imageData);
-                        imageHashMapping[imageFile.fileName] = image.hash;
-                    }
-                    else {
-                        console.warn(`No image data found for: ${imageFile.fileName}`);
-                    }
-                }
-                catch (error) {
-                    console.error(`Failed to process image file: ${imageFile.fileName}`, error);
-                }
-            }
-            // グローバル変数に画像マッピングを保存（後でノード作成時に使用）
-            globalThis.imageDataMapping = imageDataMapping;
-            globalThis.imageHashMapping = imageHashMapping;
-            // 画像マッピングが正しく作成されたかチェック
-            if (Object.keys(imageDataMapping).length === 0) {
-                console.warn('No image data mappings were created!');
-            }
-            else {
-                for (const [fileName, hash] of Object.entries(imageHashMapping)) {
-                    const dataSize = imageDataMapping[fileName] ? imageDataMapping[fileName].length : 0;
-                }
-            }
-        }
-        catch (error) {
-            console.error('Failed to process image files:', error);
-        }
-    });
-}
-// フレームをメタデータから作成
-function createFrameFromMetadata(frameMetadata) {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            // フレームを作成
-            const frame = figma.createFrame();
-            // 基本プロパティを設定
-            frame.name = frameMetadata.name || 'Imported Frame';
-            frame.x = frameMetadata.x || 0;
-            frame.y = frameMetadata.y || 0;
-            frame.resize(frameMetadata.width || 100, frameMetadata.height || 100);
-            // 可視性とロック状態
-            if (frameMetadata.visible !== undefined) {
-                frame.visible = frameMetadata.visible;
-            }
-            if (frameMetadata.locked !== undefined) {
-                frame.locked = frameMetadata.locked;
-            }
-            // 回転とスケール
-            if (frameMetadata.rotation !== null && frameMetadata.rotation !== undefined) {
-                frame.rotation = frameMetadata.rotation;
-            }
-            // 制約情報
-            if (frameMetadata.constraints) {
-                frame.constraints = frameMetadata.constraints;
-            }
-            // レイアウト情報
-            if (frameMetadata.layoutAlign !== null && frameMetadata.layoutAlign !== undefined) {
-                frame.layoutAlign = frameMetadata.layoutAlign;
-            }
-            if (frameMetadata.layoutGrow !== null && frameMetadata.layoutGrow !== undefined) {
-                frame.layoutGrow = frameMetadata.layoutGrow;
-            }
-            // レイアウトモード
-            if (frameMetadata.layoutMode !== null && frameMetadata.layoutMode !== undefined) {
-                frame.layoutMode = frameMetadata.layoutMode;
-            }
-            // パディング
-            if (frameMetadata.paddingLeft !== null && frameMetadata.paddingLeft !== undefined) {
-                frame.paddingLeft = frameMetadata.paddingLeft;
-            }
-            if (frameMetadata.paddingRight !== null && frameMetadata.paddingRight !== undefined) {
-                frame.paddingRight = frameMetadata.paddingRight;
-            }
-            if (frameMetadata.paddingTop !== null && frameMetadata.paddingTop !== undefined) {
-                frame.paddingTop = frameMetadata.paddingTop;
-            }
-            if (frameMetadata.paddingBottom !== null && frameMetadata.paddingBottom !== undefined) {
-                frame.paddingBottom = frameMetadata.paddingBottom;
-            }
-            // アイテム間隔
-            if (frameMetadata.itemSpacing !== null && frameMetadata.itemSpacing !== undefined) {
-                frame.itemSpacing = frameMetadata.itemSpacing;
-            }
-            // 配置
-            if (frameMetadata.primaryAxisAlignItems !== null && frameMetadata.primaryAxisAlignItems !== undefined) {
-                frame.primaryAxisAlignItems = frameMetadata.primaryAxisAlignItems;
-            }
-            if (frameMetadata.counterAxisAlignItems !== null && frameMetadata.counterAxisAlignItems !== undefined) {
-                frame.counterAxisAlignItems = frameMetadata.counterAxisAlignItems;
-            }
-            // 自動レイアウト
-            if (frameMetadata.layoutSizingHorizontal !== null && frameMetadata.layoutSizingHorizontal !== undefined) {
-                frame.layoutSizingHorizontal = frameMetadata.layoutSizingHorizontal;
-            }
-            if (frameMetadata.layoutSizingVertical !== null && frameMetadata.layoutSizingVertical !== undefined) {
-                frame.layoutSizingVertical = frameMetadata.layoutSizingVertical;
-            }
-            // 塗りつぶし
-            if (frameMetadata.fills && Array.isArray(frameMetadata.fills)) {
-                // グラデーション関連のプロパティを除去してから設定
-                const cleanFills = frameMetadata.fills.map((fill) => {
-                    const cleanFill = Object.assign({}, fill);
-                    // グラデーション関連のプロパティを削除
-                    delete cleanFill.gradientStops;
-                    delete cleanFill.gradientTransform;
-                    // IMAGEタイプの場合は画像データを直接使用
-                    if (fill.type === 'IMAGE' && fill.imageHash) {
-                        // 画像データマッピングから画像データを取得
-                        const imageDataMapping = globalThis.imageDataMapping;
-                        const imageHashMapping = globalThis.imageHashMapping;
-                        // ファイル名から画像データを取得
-                        let imageData = null;
-                        let imageHash = null;
-                        if (fill.fileName && imageDataMapping && imageDataMapping[fill.fileName]) {
-                            imageData = imageDataMapping[fill.fileName];
-                            imageHash = imageHashMapping[fill.fileName];
-                        }
-                        else {
-                            // ファイル名から推測してマッピングを試行
-                            if (fill.fileName && imageDataMapping) {
-                                const availableFiles = Object.keys(imageDataMapping);
-                                // 完全一致を試行
-                                let matchingFile = availableFiles.find(file => file === fill.fileName ||
-                                    file.toLowerCase() === fill.fileName.toLowerCase());
-                                // 完全一致が見つからない場合、部分一致を試行
-                                if (!matchingFile) {
-                                    matchingFile = availableFiles.find(file => file.includes(fill.fileName.replace('.png', '')) ||
-                                        fill.fileName.includes(file.replace('.png', '')));
-                                }
-                                if (matchingFile && imageDataMapping[matchingFile]) {
-                                    imageData = imageDataMapping[matchingFile];
-                                    imageHash = imageHashMapping[matchingFile];
-                                }
-                                else {
-                                    console.warn(`No matching file found for frame: ${fill.fileName}`);
-                                }
-                            }
-                        }
-                        // 有効な画像データが見つかった場合のみ画像フィルを作成
-                        if (imageData && imageHash && imageHash !== '') {
-                            const imageFill = {
-                                type: 'IMAGE',
-                                visible: fill.visible !== false,
-                                opacity: fill.opacity || 1,
-                                imageHash: imageHash,
-                                scaleMode: fill.scaleMode || 'FILL',
-                                imageTransform: fill.imageTransform || [[1, 0, 0], [0, 1, 0]]
-                            };
-                            return imageFill;
-                        }
-                        else {
-                            console.warn(`No valid image data found for frame: ${fill.fileName}, using SOLID fill as fallback`);
-                            // 有効な画像データが見つからない場合は、SOLIDフィルにフォールバック
-                            return {
-                                type: 'SOLID',
-                                visible: fill.visible !== false,
-                                opacity: fill.opacity || 1,
-                                color: { r: 0.8, g: 0.8, b: 0.8 }
-                            };
-                        }
-                    }
-                    return cleanFill;
-                });
-                frame.fills = cleanFills;
-            }
-            // ストローク
-            if (frameMetadata.strokes && Array.isArray(frameMetadata.strokes)) {
-                // ストローク関連のプロパティを適切に処理
-                const cleanStrokes = frameMetadata.strokes.map((stroke) => {
-                    const cleanStroke = Object.assign({}, stroke);
-                    // 認識されないプロパティを削除（Figma APIで対応していないもの）
-                    delete cleanStroke.dashPattern; // 破線パターンは後で個別に設定
-                    return cleanStroke;
-                });
-                frame.strokes = cleanStrokes;
-                // 破線パターンを個別に設定（対応している場合）
-                if (frameMetadata.strokes && frameMetadata.strokes.length > 0) {
-                    const firstStroke = frameMetadata.strokes[0];
-                    if (firstStroke.dashPattern && Array.isArray(firstStroke.dashPattern)) {
-                        try {
-                            frame.dashPattern = firstStroke.dashPattern;
-                        }
-                        catch (error) {
-                            console.warn('Failed to set dash pattern:', error);
-                        }
-                    }
-                }
-            }
-            // エフェクト
-            if (frameMetadata.effects && Array.isArray(frameMetadata.effects)) {
-                frame.effects = frameMetadata.effects;
-            }
-            // ブレンドモード
-            if (frameMetadata.blendMode !== null && frameMetadata.blendMode !== undefined) {
-                frame.blendMode = frameMetadata.blendMode;
-            }
-            // 透明度
-            if (frameMetadata.opacity !== null && frameMetadata.opacity !== undefined) {
-                frame.opacity = frameMetadata.opacity;
-            }
-            // クリッピングマスク
-            if (frameMetadata.clipsContent !== null && frameMetadata.clipsContent !== undefined) {
-                frame.clipsContent = frameMetadata.clipsContent;
-            }
-            // クリッピングマスクの詳細情報を適用
-            if (frameMetadata.clippingMask && frameMetadata.clippingMask.enabled) {
-                // クリッピングマスクの詳細情報を保存（後で子ノード作成時に使用）
-                frameMetadata.clippingMaskInfo = frameMetadata.clippingMask;
-            }
-            // フレーム構造の情報を保存（後で子ノードを作成する際に使用）
-            if (frameMetadata.frameStructure && frameMetadata.frameStructure.children) {
-                // フレームの子ノード情報を保存（後で処理）
-                // 子ノードのfillsにもファイル名を追加
-                for (const childInfo of frameMetadata.frameStructure.children) {
-                    if (childInfo.fills && Array.isArray(childInfo.fills)) {
-                        const imageFills = childInfo.fills.filter((fill) => fill.type === 'IMAGE');
-                        if (imageFills.length > 0) {
-                            // 子ノードのfillsにファイル名を追加
-                            childInfo.fills = childInfo.fills.map((fill) => {
-                                if (fill.type === 'IMAGE') {
-                                    // 子ノードの名前からファイル名を生成
-                                    const childFileName = `${childInfo.name}.png`;
-                                    const imageFillWithFileName = Object.assign(Object.assign({}, fill), { fileName: childFileName });
-                                    return imageFillWithFileName;
-                                }
-                                return fill;
-                            });
-                        }
-                    }
-                }
-            }
-            // 現在のページに追加
-            figma.currentPage.appendChild(frame);
-            // 作成したフレームを選択
-            figma.currentPage.selection = [frame];
-            return frame;
-        }
-        catch (error) {
-            console.error(`Failed to create frame: ${frameMetadata.name}`, error);
-            throw new Error(`フレームの作成に失敗しました: ${frameMetadata.name} - ${error.message}`);
-        }
-    });
-}
-// グループをメタデータから作成
-function createGroupFromMetadata(groupMetadata) {
-    return __awaiter(this, void 0, void 0, function* () {
-        var _a;
-        try {
-            // グループの子ノード情報を取得
-            const groupChildren = ((_a = groupMetadata.groupStructure) === null || _a === void 0 ? void 0 : _a.children) || [];
-            // 子要素がない場合はグループを作成しない
-            if (groupChildren.length === 0) {
-                return null;
-            }
-            // 子ノードを先に作成
-            const childNodes = [];
-            const childPositions = [];
-            for (const childInfo of groupChildren) {
-                // テキストノードの場合は特別なログを追加
-                if (childInfo.type === 'TEXT') {
-                }
-                const childNode = yield createChildNode(childInfo);
-                if (childNode) {
-                    // isMaskプロパティがあれば復元
-                    if (childInfo.isMask === true && 'isMask' in childNode) {
-                        childNode.isMask = true;
-                    }
-                    childNodes.push(childNode);
-                    childPositions.push({
-                        x: childInfo.x || 0,
-                        y: childInfo.y || 0
-                    });
-                }
-            }
-            // 有効な子ノードがない場合はグループを作成しない
-            if (childNodes.length === 0) {
-                return null;
-            }
-            // isMask: trueのノードが先頭になるように並べ替え
-            const maskIndex = groupChildren.findIndex((c) => c.isMask === true);
-            let orderedChildNodes = childNodes;
-            let orderedChildPositions = childPositions;
-            if (maskIndex > 0) {
-                // isMaskノードを先頭に移動
-                const maskNode = childNodes[maskIndex];
-                const maskPos = childPositions[maskIndex];
-                orderedChildNodes = [maskNode, ...childNodes.slice(0, maskIndex), ...childNodes.slice(maskIndex + 1)];
-                orderedChildPositions = [maskPos, ...childPositions.slice(0, maskIndex), ...childPositions.slice(maskIndex + 1)];
-            }
-            // 空のグループを先に作成
-            const tempRect = figma.createRectangle();
-            tempRect.name = 'temp';
-            tempRect.resize(1, 1);
-            tempRect.x = groupMetadata.x || 0;
-            tempRect.y = groupMetadata.y || 0;
-            // グループを作成
-            const group = figma.group([tempRect], figma.currentPage);
-            group.name = groupMetadata.name || 'Imported Group';
-            // 基本プロパティを設定
-            if (groupMetadata.visible !== undefined) {
-                group.visible = groupMetadata.visible;
-            }
-            if (groupMetadata.locked !== undefined) {
-                group.locked = groupMetadata.locked;
-            }
-            // 回転
-            if (groupMetadata.rotation !== null && groupMetadata.rotation !== undefined) {
-                group.rotation = groupMetadata.rotation;
-            }
-            // レイアウト情報
-            if (groupMetadata.layoutAlign !== null && groupMetadata.layoutAlign !== undefined) {
-                group.layoutAlign = groupMetadata.layoutAlign;
-            }
-            if (groupMetadata.layoutGrow !== null && groupMetadata.layoutGrow !== undefined) {
-                group.layoutGrow = groupMetadata.layoutGrow;
-            }
-            // エフェクト
-            if (groupMetadata.effects && Array.isArray(groupMetadata.effects)) {
-                group.effects = groupMetadata.effects;
-            }
-            // ブレンドモード
-            if (groupMetadata.blendMode !== null && groupMetadata.blendMode !== undefined) {
-                group.blendMode = groupMetadata.blendMode;
-            }
-            // 透明度
-            if (groupMetadata.opacity !== null && groupMetadata.opacity !== undefined) {
-                group.opacity = groupMetadata.opacity;
-            }
-            // グループの位置を設定
-            const groupX = groupMetadata.x || 0;
-            const groupY = groupMetadata.y || 0;
-            group.x = groupX;
-            group.y = groupY;
-            // 子ノードをグループに追加
-            for (let i = 0; i < orderedChildNodes.length; i++) {
-                const childNode = orderedChildNodes[i];
-                const childInfo = groupChildren[i];
-                const relativePos = orderedChildPositions[i];
-                // グループに子ノードを追加
-                group.appendChild(childNode);
-                // グループ内での相対位置を設定
-                // 子ノードの位置をグループの原点からの相対位置に設定
-                childNode.x = relativePos.x;
-                childNode.y = relativePos.y;
-                // 子ノードがグループの場合、その子ノードも処理
-                if (childInfo.type === 'GROUP' && childInfo.groupStructure && childInfo.groupStructure.children) {
-                    const nestedGroup = childNode;
-                    const nestedChildren = childInfo.groupStructure.children;
-                    for (const nestedChildInfo of nestedChildren) {
-                        const nestedChildNode = yield createChildNode(nestedChildInfo);
-                        if (nestedChildNode) {
-                            // ネストしたグループに子ノードを追加
-                            nestedGroup.appendChild(nestedChildNode);
-                            // ネストしたグループ内での相対位置を設定
-                            const nestedRelativeX = nestedChildInfo.x || 0;
-                            const nestedRelativeY = nestedChildInfo.y || 0;
-                            nestedChildNode.x = nestedRelativeX;
-                            nestedChildNode.y = nestedRelativeY;
-                        }
-                    }
-                }
-            }
-            // 一時的なノードを削除
-            tempRect.remove();
-            // グループのサイズを子ノードに基づいて調整
-            if (childNodes.length > 0) {
-                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-                for (const childNode of childNodes) {
-                    minX = Math.min(minX, childNode.x);
-                    minY = Math.min(minY, childNode.y);
-                    maxX = Math.max(maxX, childNode.x + childNode.width);
-                    maxY = Math.max(maxY, childNode.y + childNode.height);
-                }
-                const groupWidth = maxX - minX;
-                const groupHeight = maxY - minY;
-                // グループのサイズを設定（最小サイズを保証）
-                group.resize(Math.max(groupWidth, groupMetadata.width || 100), Math.max(groupHeight, groupMetadata.height || 100));
-            }
-            else {
-                // デフォルトサイズを設定
-                group.resize(groupMetadata.width || 100, groupMetadata.height || 100);
-            }
-            // 可視性とロック状態
-            if (groupMetadata.visible !== undefined) {
-                group.visible = groupMetadata.visible;
-            }
-            if (groupMetadata.locked !== undefined) {
-                group.locked = groupMetadata.locked;
-            }
-            // 回転
-            if (groupMetadata.rotation !== null && groupMetadata.rotation !== undefined) {
-                group.rotation = groupMetadata.rotation;
-            }
-            // レイアウト情報
-            if (groupMetadata.layoutAlign !== null && groupMetadata.layoutAlign !== undefined) {
-                group.layoutAlign = groupMetadata.layoutAlign;
-            }
-            if (groupMetadata.layoutGrow !== null && groupMetadata.layoutGrow !== undefined) {
-                group.layoutGrow = groupMetadata.layoutGrow;
-            }
-            // エフェクト
-            if (groupMetadata.effects && Array.isArray(groupMetadata.effects)) {
-                group.effects = groupMetadata.effects;
-            }
-            // ブレンドモード
-            if (groupMetadata.blendMode !== null && groupMetadata.blendMode !== undefined) {
-                group.blendMode = groupMetadata.blendMode;
-            }
-            // 透明度
-            if (groupMetadata.opacity !== null && groupMetadata.opacity !== undefined) {
-                group.opacity = groupMetadata.opacity;
-            }
-            // 現在のページに追加
-            figma.currentPage.appendChild(group);
-            // 作成したグループを選択
-            figma.currentPage.selection = [group];
-            return group;
-        }
-        catch (error) {
-            console.error(`Failed to create group: ${groupMetadata.name}`, error);
-            throw new Error(`グループの作成に失敗しました: ${groupMetadata.name} - ${error.message}`);
-        }
-    });
-}
-// テキストノードをメタデータから作成
-function createTextFromMetadata(textMetadata) {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            // テキストノードを作成
-            const text = figma.createText();
-            // 基本プロパティを設定
-            text.name = textMetadata.name || 'Imported Text';
-            text.x = textMetadata.x || 0;
-            text.y = textMetadata.y || 0;
-            text.resize(textMetadata.width || 100, textMetadata.height || 100);
-            // 可視性とロック状態
-            if (textMetadata.visible !== undefined) {
-                text.visible = textMetadata.visible;
-            }
-            if (textMetadata.locked !== undefined) {
-                text.locked = textMetadata.locked;
-            }
-            // 回転
-            if (textMetadata.rotation !== null && textMetadata.rotation !== undefined) {
-                text.rotation = textMetadata.rotation;
-            }
-            // 制約情報
-            if (textMetadata.constraints) {
-                text.constraints = textMetadata.constraints;
-            }
-            // レイアウト情報
-            if (textMetadata.layoutAlign !== null && textMetadata.layoutAlign !== undefined) {
-                text.layoutAlign = textMetadata.layoutAlign;
-            }
-            if (textMetadata.layoutGrow !== null && textMetadata.layoutGrow !== undefined) {
-                text.layoutGrow = textMetadata.layoutGrow;
-            }
-            // フォント情報（テキスト内容を設定する前に必要）
-            if (textMetadata.fontName && typeof textMetadata.fontName === 'object') {
-                try {
-                    yield figma.loadFontAsync(textMetadata.fontName);
-                    text.fontName = textMetadata.fontName;
-                }
-                catch (error) {
-                    console.warn(`Failed to load font: ${textMetadata.fontName.family} ${textMetadata.fontName.style}`, error);
-                    // フォント読み込みに失敗した場合はデフォルトフォントを使用
+                console.log(`処理対象ノード数: ${nodes.length}`);
+                const designNodes = [];
+                const allImages = {};
+                let processedImageCount = 0;
+                for (let i = 0; i < nodes.length; i++) {
+                    const node = nodes[i];
                     try {
-                        yield figma.loadFontAsync({ family: "Inter", style: "Regular" });
-                        text.fontName = { family: "Inter", style: "Regular" };
-                    }
-                    catch (fallbackError) {
-                        console.error('Failed to load fallback font:', fallbackError);
-                    }
-                }
-            }
-            // テキスト内容（フォント読み込み後に実行）
-            if (textMetadata.textContent) {
-                try {
-                    text.characters = textMetadata.textContent;
-                }
-                catch (error) {
-                    console.warn(`Failed to set text content: "${textMetadata.textContent}"`, error);
-                }
-            }
-            // フォントサイズ
-            if (textMetadata.fontSize !== null && textMetadata.fontSize !== undefined) {
-                text.fontSize = textMetadata.fontSize;
-            }
-            // 行の高さ
-            if (textMetadata.lineHeight !== null && textMetadata.lineHeight !== undefined) {
-                text.lineHeight = textMetadata.lineHeight;
-            }
-            // 文字間隔
-            if (textMetadata.letterSpacing !== null && textMetadata.letterSpacing !== undefined) {
-                text.letterSpacing = textMetadata.letterSpacing;
-            }
-            // テキスト配置
-            if (textMetadata.textAlignHorizontal !== null && textMetadata.textAlignHorizontal !== undefined) {
-                text.textAlignHorizontal = textMetadata.textAlignHorizontal;
-            }
-            if (textMetadata.textAlignVertical !== null && textMetadata.textAlignVertical !== undefined) {
-                text.textAlignVertical = textMetadata.textAlignVertical;
-            }
-            // テキスト自動リサイズ
-            if (textMetadata.textAutoResize !== null && textMetadata.textAutoResize !== undefined) {
-                text.textAutoResize = textMetadata.textAutoResize;
-            }
-            // テキストケース
-            if (textMetadata.textCase !== null && textMetadata.textCase !== undefined) {
-                text.textCase = textMetadata.textCase;
-            }
-            // テキスト装飾
-            if (textMetadata.textDecoration !== null && textMetadata.textDecoration !== undefined) {
-                text.textDecoration = textMetadata.textDecoration;
-            }
-            // 段落インデント
-            if (textMetadata.paragraphIndent !== null && textMetadata.paragraphIndent !== undefined) {
-                text.paragraphIndent = textMetadata.paragraphIndent;
-            }
-            // 段落間隔
-            if (textMetadata.paragraphSpacing !== null && textMetadata.paragraphSpacing !== undefined) {
-                text.paragraphSpacing = textMetadata.paragraphSpacing;
-            }
-            // 塗りつぶし（テキストの色）を設定
-            if (textMetadata.textFills && Array.isArray(textMetadata.textFills)) {
-                // グラデーション関連のプロパティを除去してから設定
-                const cleanTextFills = textMetadata.textFills.map((fill) => {
-                    const cleanFill = Object.assign({}, fill);
-                    // グラデーション関連のプロパティを削除
-                    delete cleanFill.gradientStops;
-                    delete cleanFill.gradientTransform;
-                    // IMAGEタイプの場合は画像ハッシュを保持
-                    if (fill.type === 'IMAGE' && fill.imageHash) {
-                        // 画像マッピングからハッシュを取得
-                        const imageMapping = globalThis.imageMapping;
-                        let imageHash = fill.imageHash;
-                        // ファイル名が含まれている場合は、マッピングから取得
-                        if (fill.fileName && imageMapping && imageMapping[fill.fileName]) {
-                            imageHash = imageMapping[fill.fileName];
+                        console.log(`ノード処理中 (${i + 1}/${nodes.length}): ${node.name} (${node.type})`);
+                        const { node: designNode, images } = yield this.processImageNode(node);
+                        designNodes.push(designNode);
+                        // 画像データを収集
+                        const imageCount = Object.keys(images).length;
+                        if (imageCount > 0) {
+                            Object.assign(allImages, images);
+                            processedImageCount += imageCount;
+                            console.log(`ノード "${node.name}" から ${imageCount} 個の画像を処理しました`);
                         }
-                        return {
-                            type: 'IMAGE',
-                            visible: fill.visible !== false,
-                            opacity: fill.opacity || 1,
-                            imageHash: imageHash,
-                            scaleMode: fill.scaleMode || 'FILL',
-                            imageTransform: fill.imageTransform || [[1, 0, 0], [0, 1, 0]]
-                        };
-                    }
-                    return cleanFill;
-                });
-                text.fills = cleanTextFills;
-            }
-            // ストローク
-            if (textMetadata.textStrokes && Array.isArray(textMetadata.textStrokes)) {
-                // ストローク関連のプロパティを適切に処理
-                const cleanStrokes = textMetadata.textStrokes.map((stroke) => {
-                    const cleanStroke = Object.assign({}, stroke);
-                    // 認識されないプロパティを削除（Figma APIで対応していないもの）
-                    delete cleanStroke.dashPattern; // 破線パターンは後で個別に設定
-                    return cleanStroke;
-                });
-                text.strokes = cleanStrokes;
-                // 破線パターンを個別に設定（対応している場合）
-                if (textMetadata.textStrokes && textMetadata.textStrokes.length > 0) {
-                    const firstStroke = textMetadata.textStrokes[0];
-                    if (firstStroke.dashPattern && Array.isArray(firstStroke.dashPattern)) {
-                        try {
-                            text.dashPattern = firstStroke.dashPattern;
-                        }
-                        catch (error) {
-                            console.warn('Failed to set text dash pattern:', error);
-                        }
-                    }
-                }
-            }
-            // エフェクト
-            if (textMetadata.textEffects && Array.isArray(textMetadata.textEffects)) {
-                text.effects = textMetadata.textEffects;
-            }
-            // ブレンドモード
-            if (textMetadata.blendMode !== null && textMetadata.blendMode !== undefined) {
-                text.blendMode = textMetadata.blendMode;
-            }
-            // 透明度
-            if (textMetadata.opacity !== null && textMetadata.opacity !== undefined) {
-                text.opacity = textMetadata.opacity;
-            }
-            // クリッピングマスク
-            if (textMetadata.clipsContent !== null && textMetadata.clipsContent !== undefined) {
-                if ('clipsContent' in text) {
-                    text.clipsContent = textMetadata.clipsContent;
-                }
-            }
-            // 現在のページに追加
-            figma.currentPage.appendChild(text);
-            // 作成したテキストを選択
-            figma.currentPage.selection = [text];
-            return text;
-        }
-        catch (error) {
-            console.error(`Failed to create text: ${textMetadata.name}`, error);
-            throw new Error(`テキストの作成に失敗しました: ${textMetadata.name} - ${error.message}`);
-        }
-    });
-}
-// 図形ノードをメタデータから作成
-function createShapeFromMetadata(shapeMetadata) {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            let shape;
-            // ノードタイプに応じて図形を作成
-            switch (shapeMetadata.type) {
-                case 'RECTANGLE':
-                    // 画像ノード判定: fillsにIMAGEタイプが含まれているか
-                    const hasImageFill = Array.isArray(shapeMetadata.fills) && shapeMetadata.fills.some((fill) => fill.type === 'IMAGE');
-                    // 画像ファイル名と一致するだけの長方形ノードをスキップ
-                    if (!hasImageFill && shapeMetadata.imageFileName) {
-                        // 画像ファイル名が指定されているが、fillsにIMAGEがない場合はスキップ
-                        return null;
-                    }
-                    shape = figma.createRectangle();
-                    break;
-                case 'ELLIPSE':
-                    shape = figma.createEllipse();
-                    break;
-                case 'POLYGON':
-                    shape = figma.createPolygon();
-                    break;
-                case 'STAR':
-                    shape = figma.createStar();
-                    break;
-                case 'VECTOR':
-                    shape = figma.createVector();
-                    break;
-                case 'LINE':
-                    shape = figma.createLine();
-                    break;
-                case 'ARC':
-                    // ARCは直接作成できないため、楕円で代替
-                    shape = figma.createEllipse();
-                    break;
-                case 'BOOLEAN_OPERATION':
-                    // ブール演算は複雑なため、矩形で代替
-                    shape = figma.createRectangle();
-                    break;
-                case 'SLICE':
-                    // スライスは矩形で代替
-                    shape = figma.createRectangle();
-                    break;
-                case 'INSTANCE':
-                    // インスタンスは矩形で代替
-                    shape = figma.createRectangle();
-                    break;
-                case 'COMPONENT':
-                    // コンポーネントは矩形で代替
-                    shape = figma.createRectangle();
-                    break;
-                default:
-                    console.warn(`Unsupported shape type: ${shapeMetadata.type}, creating rectangle as fallback`);
-                    shape = figma.createRectangle();
-                    break;
-            }
-            // 基本プロパティを設定
-            shape.name = shapeMetadata.name || 'Imported Shape';
-            shape.x = shapeMetadata.x || 0;
-            shape.y = shapeMetadata.y || 0;
-            shape.resize(shapeMetadata.width || 100, shapeMetadata.height || 100);
-            // 可視性とロック状態
-            if (shapeMetadata.visible !== undefined) {
-                shape.visible = shapeMetadata.visible;
-            }
-            if (shapeMetadata.locked !== undefined) {
-                shape.locked = shapeMetadata.locked;
-            }
-            // 回転
-            if (shapeMetadata.rotation !== null && shapeMetadata.rotation !== undefined) {
-                shape.rotation = shapeMetadata.rotation;
-            }
-            // 制約情報
-            if (shapeMetadata.constraints) {
-                shape.constraints = shapeMetadata.constraints;
-            }
-            // レイアウト情報
-            if (shapeMetadata.layoutAlign !== null && shapeMetadata.layoutAlign !== undefined) {
-                shape.layoutAlign = shapeMetadata.layoutAlign;
-            }
-            if (shapeMetadata.layoutGrow !== null && shapeMetadata.layoutGrow !== undefined) {
-                shape.layoutGrow = shapeMetadata.layoutGrow;
-            }
-            // 角丸（矩形の場合）
-            if (shapeMetadata.type === 'RECTANGLE' && shapeMetadata.cornerRadius !== null && shapeMetadata.cornerRadius !== undefined) {
-                shape.cornerRadius = shapeMetadata.cornerRadius;
-            }
-            // 線の情報（LINEノード用）
-            if (shapeMetadata.type === 'LINE') {
-                const lineNode = shape;
-                if (shapeMetadata.strokeWeight !== null && shapeMetadata.strokeWeight !== undefined) {
-                    lineNode.strokeWeight = shapeMetadata.strokeWeight;
-                }
-                if (shapeMetadata.strokeAlign !== null && shapeMetadata.strokeAlign !== undefined) {
-                    lineNode.strokeAlign = shapeMetadata.strokeAlign;
-                }
-                if (shapeMetadata.strokeCap !== null && shapeMetadata.strokeCap !== undefined) {
-                    lineNode.strokeCap = shapeMetadata.strokeCap;
-                }
-                if (shapeMetadata.strokeJoin !== null && shapeMetadata.strokeJoin !== undefined) {
-                    lineNode.strokeJoin = shapeMetadata.strokeJoin;
-                }
-                if (shapeMetadata.dashPattern !== null && shapeMetadata.dashPattern !== undefined) {
-                    lineNode.dashPattern = shapeMetadata.dashPattern;
-                }
-            }
-            // ストロークの詳細設定を適用（すべての図形タイプ）
-            if (shapeMetadata.strokes && Array.isArray(shapeMetadata.strokes) && shapeMetadata.strokes.length > 0) {
-                const firstStroke = shapeMetadata.strokes[0];
-                // ストロークの太さを設定
-                if (firstStroke.weight !== null && firstStroke.weight !== undefined) {
-                    try {
-                        shape.strokeWeight = firstStroke.weight;
                     }
                     catch (error) {
-                        console.warn('Failed to set stroke weight:', error);
+                        console.error(`ノード処理中にエラーが発生しました: ${node.name}`, error);
+                        // エラーが発生しても処理を継続
                     }
                 }
-                // ストロークの配置を設定
-                if (firstStroke.align !== null && firstStroke.align !== undefined) {
-                    try {
-                        shape.strokeAlign = firstStroke.align;
-                    }
-                    catch (error) {
-                        console.warn('Failed to set stroke align:', error);
-                    }
-                }
+                console.log(`合計 ${processedImageCount} 個の画像を処理しました`);
+                console.log('画像ファイル一覧:', Object.keys(allImages));
+                const result = {
+                    version: '1.0.0',
+                    nodes: designNodes,
+                    images: allImages
+                };
+                console.log('エクスポート完了');
+                return result;
             }
-            // 多角形の情報（POLYGONノード用）
-            if (shapeMetadata.type === 'POLYGON' && shapeMetadata.pointCount !== null && shapeMetadata.pointCount !== undefined) {
-                shape.pointCount = shapeMetadata.pointCount;
+            catch (error) {
+                console.error('エクスポート処理中にエラーが発生しました:', error);
+                throw error;
             }
-            // 星の情報（STARノード用）
-            if (shapeMetadata.type === 'STAR' && shapeMetadata.innerRadius !== null && shapeMetadata.innerRadius !== undefined) {
-                shape.innerRadius = shapeMetadata.innerRadius;
-            }
-            // 塗りつぶし
-            if (shapeMetadata.fills && Array.isArray(shapeMetadata.fills)) {
-                // グラデーション関連のプロパティを除去してから設定
-                const cleanFills = shapeMetadata.fills.map((fill) => {
-                    const cleanFill = Object.assign({}, fill);
-                    // グラデーション関連のプロパティを削除
-                    delete cleanFill.gradientStops;
-                    delete cleanFill.gradientTransform;
-                    // IMAGEタイプの場合は画像データを直接使用
-                    if (fill.type === 'IMAGE' && fill.imageHash) {
-                        // 画像データマッピングから画像データを取得
-                        const imageDataMapping = globalThis.imageDataMapping;
-                        const imageHashMapping = globalThis.imageHashMapping;
-                        // ファイル名から画像データを取得
-                        let imageData = null;
-                        let imageHash = null;
-                        if (fill.fileName && imageDataMapping && imageDataMapping[fill.fileName]) {
-                            imageData = imageDataMapping[fill.fileName];
-                            imageHash = imageHashMapping[fill.fileName];
-                        }
-                        else {
-                            // ファイル名から推測してマッピングを試行
-                            if (fill.fileName && imageDataMapping) {
-                                const availableFiles = Object.keys(imageDataMapping);
-                                // 完全一致を試行
-                                let matchingFile = availableFiles.find(file => file === fill.fileName ||
-                                    file.toLowerCase() === fill.fileName.toLowerCase());
-                                // 完全一致が見つからない場合、部分一致を試行
-                                if (!matchingFile) {
-                                    matchingFile = availableFiles.find(file => file.includes(fill.fileName.replace('.png', '')) ||
-                                        fill.fileName.includes(file.replace('.png', '')));
-                                }
-                                if (matchingFile && imageDataMapping[matchingFile]) {
-                                    imageData = imageDataMapping[matchingFile];
-                                    imageHash = imageHashMapping[matchingFile];
-                                }
-                                else {
-                                }
-                            }
-                        }
-                        // 有効な画像データが見つかった場合のみ画像フィルを作成
-                        if (imageData && imageHash && imageHash !== '') {
-                            const imageFill = {
-                                type: 'IMAGE',
-                                visible: fill.visible !== false,
-                                opacity: fill.opacity || 1,
-                                imageHash: imageHash,
-                                scaleMode: fill.scaleMode || 'FILL',
-                                imageTransform: fill.imageTransform || [[1, 0, 0], [0, 1, 0]]
-                            };
-                            return imageFill;
-                        }
-                        else {
-                            console.warn(`No valid image data found for shape: ${fill.fileName}, using SOLID fill as fallback`);
-                            // 有効な画像データが見つからない場合は、SOLIDフィルにフォールバック
-                            return {
-                                type: 'SOLID',
-                                visible: fill.visible !== false,
-                                opacity: fill.opacity || 1,
-                                color: { r: 0.8, g: 0.8, b: 0.8 }
-                            };
-                        }
-                    }
-                    return cleanFill;
-                });
-                shape.fills = cleanFills;
-            }
-            // ストローク
-            if (shapeMetadata.strokes && Array.isArray(shapeMetadata.strokes)) {
-                // ストローク関連のプロパティを適切に処理
-                const cleanStrokes = shapeMetadata.strokes.map((stroke) => {
-                    const cleanStroke = Object.assign({}, stroke);
-                    // 認識されないプロパティを削除（Figma APIで対応していないもの）
-                    delete cleanStroke.dashPattern; // 破線パターンは後で個別に設定
-                    return cleanStroke;
-                });
-                shape.strokes = cleanStrokes;
-                // 破線パターンを個別に設定（対応している場合）
-                if (shapeMetadata.strokes && shapeMetadata.strokes.length > 0) {
-                    const firstStroke = shapeMetadata.strokes[0];
-                    if (firstStroke.dashPattern && Array.isArray(firstStroke.dashPattern)) {
-                        try {
-                            shape.dashPattern = firstStroke.dashPattern;
-                        }
-                        catch (error) {
-                            console.warn('Failed to set shape dash pattern:', error);
-                        }
-                    }
-                }
-            }
-            // エフェクト
-            if (shapeMetadata.effects && Array.isArray(shapeMetadata.effects)) {
-                shape.effects = shapeMetadata.effects;
-            }
-            // ブレンドモード
-            if (shapeMetadata.blendMode !== null && shapeMetadata.blendMode !== undefined) {
-                shape.blendMode = shapeMetadata.blendMode;
-            }
-            // 透明度
-            if (shapeMetadata.opacity !== null && shapeMetadata.opacity !== undefined) {
-                shape.opacity = shapeMetadata.opacity;
-            }
-            // クリッピングマスク
-            if (shapeMetadata.clipsContent !== null && shapeMetadata.clipsContent !== undefined) {
-                if ('clipsContent' in shape) {
-                    shape.clipsContent = shapeMetadata.clipsContent;
-                }
-            }
-            // 現在のページに追加
-            figma.currentPage.appendChild(shape);
-            // 作成した図形を選択
-            figma.currentPage.selection = [shape];
-            return shape;
-        }
-        catch (error) {
-            console.error(`Failed to create shape: ${shapeMetadata.name}`, error);
-            throw new Error(`図形の作成に失敗しました: ${shapeMetadata.name} - ${error.message}`);
-        }
-    });
+        });
+    }
 }
-// 子ノードの配置を処理
-function processChildNodes(nodes, idMapping) {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            // 各ノードの子ノードを処理（フレームのみ、グループは既に処理済み）
-            for (const nodeData of nodes) {
-                const nodeMetadata = nodeData.metadata;
-                // フレームの子ノードを処理
-                if (nodeMetadata.type === 'FRAME' && nodeMetadata.frameStructure && nodeMetadata.frameStructure.children) {
-                    yield processFrameChildren(nodeMetadata.frameStructure, idMapping);
-                }
-                // グループの子ノードは既にcreateGroupFromMetadataで処理済みのため、ここでは追加処理のみ
-                if (nodeMetadata.type === 'GROUP' && nodeMetadata.groupStructure && nodeMetadata.groupStructure.children) {
-                    yield processGroupChildren(nodeMetadata.groupStructure, idMapping);
-                }
-            }
-        }
-        catch (error) {
-            console.error('Failed to process child nodes:', error);
-            throw new Error(`子ノードの配置に失敗しました: ${error.message}`);
-        }
-    });
-}
-// フレームの子ノードを処理
-function processFrameChildren(frameStructure, idMapping) {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            // フレームノードを取得
-            const frame = idMapping.get(frameStructure.id);
-            if (!frame || frame.type !== 'FRAME') {
-                console.warn(`Frame not found in ID mapping: ${frameStructure.id}`);
-                return;
-            }
-            // 子ノードを処理
-            for (const childInfo of frameStructure.children) {
-                // 子ノードを作成
-                const childNode = yield createChildNode(childInfo);
-                if (childNode) {
-                    // フレームに追加
-                    frame.appendChild(childNode);
-                    // 相対位置を設定（フレーム内での位置）
-                    const relativeX = childInfo.x || 0;
-                    const relativeY = childInfo.y || 0;
-                    // フレームの位置を考慮して絶対座標を計算
-                    childNode.x = frame.x + relativeX;
-                    childNode.y = frame.y + relativeY;
-                    // 作成されたノードマップに追加
-                    idMapping.set(childNode.id, childNode);
-                }
-            }
-        }
-        catch (error) {
-            console.error(`Failed to process frame children: ${frameStructure.id}`, error);
-        }
-    });
-}
-// グループの子ノードを処理
-function processGroupChildren(groupStructure, idMapping) {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            // グループノードを取得
-            const group = idMapping.get(groupStructure.id);
-            if (!group || group.type !== 'GROUP') {
-                console.warn(`Group not found in ID mapping: ${groupStructure.id}`);
-                return;
-            }
-            // グループの子ノードは既にcreateGroupFromMetadataで処理されているため、
-            // ここでは追加の処理のみ行う
-            // 子ノードのプロパティを最終調整
-            for (const child of group.children) {
-                // 子ノードのIDをマッピングに追加（まだ追加されていない場合）
-                if (!idMapping.has(child.id)) {
-                    idMapping.set(child.id, child);
-                }
-            }
-        }
-        catch (error) {
-            console.error(`Failed to process group children: ${groupStructure.id}`, error);
-        }
-    });
-}
-// 子ノードを作成
-function createChildNode(childInfo) {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            let childNode;
-            // ノードタイプに応じて作成
-            switch (childInfo.type) {
+// インポート機能のクラス
+class DesignImporter {
+    // デザインデータからノードを再作成
+    createNodeFromData(nodeData, imageMap) {
+        return __awaiter(this, void 0, void 0, function* () {
+            let node;
+            switch (nodeData.type) {
+                case 'FRAME':
+                    node = figma.createFrame();
+                    break;
                 case 'TEXT':
-                    childNode = figma.createText();
+                    node = figma.createText();
                     break;
                 case 'RECTANGLE':
-                    childNode = figma.createRectangle();
+                    node = figma.createRectangle();
                     break;
                 case 'ELLIPSE':
-                    childNode = figma.createEllipse();
+                    node = figma.createEllipse();
                     break;
                 case 'POLYGON':
-                    childNode = figma.createPolygon();
+                    node = figma.createPolygon();
                     break;
                 case 'STAR':
-                    childNode = figma.createStar();
+                    node = figma.createStar();
                     break;
                 case 'VECTOR':
-                    childNode = figma.createVector();
+                    node = figma.createVector();
                     break;
                 case 'LINE':
-                    childNode = figma.createLine();
-                    break;
-                case 'ARC':
-                    childNode = figma.createEllipse();
-                    break;
-                case 'BOOLEAN_OPERATION':
-                    childNode = figma.createRectangle();
-                    break;
-                case 'SLICE':
-                    childNode = figma.createRectangle();
-                    break;
-                case 'INSTANCE':
-                    childNode = figma.createRectangle();
-                    break;
-                case 'COMPONENT':
-                    childNode = figma.createRectangle();
+                    node = figma.createLine();
                     break;
                 case 'GROUP':
-                    // グループの子ノードとしてグループを作成する場合
-                    // groupStructureがある場合は、完全なグループを作成
-                    if (childInfo.groupStructure && childInfo.groupStructure.children && childInfo.groupStructure.children.length > 0) {
-                        // 子ノードを先に作成
-                        const nestedChildNodes = [];
-                        for (const nestedChildInfo of childInfo.groupStructure.children) {
-                            const nestedChildNode = yield createChildNode(nestedChildInfo);
-                            if (nestedChildNode) {
-                                nestedChildNodes.push(nestedChildNode);
-                            }
-                        }
-                        // 有効な子ノードがない場合は空のグループを作成
-                        if (nestedChildNodes.length === 0) {
-                            const tempRect = figma.createRectangle();
-                            tempRect.name = 'temp';
-                            tempRect.resize(1, 1);
-                            tempRect.x = childInfo.x || 0;
-                            tempRect.y = childInfo.y || 0;
-                            childNode = figma.group([tempRect], figma.currentPage);
-                            childNode.name = childInfo.name || 'Empty Group';
-                            // 基本プロパティを設定
-                            if (childInfo.visible !== undefined) {
-                                childNode.visible = childInfo.visible;
-                            }
-                            if (childInfo.locked !== undefined) {
-                                childNode.locked = childInfo.locked;
-                            }
-                            // 回転
-                            if (childInfo.rotation !== null && childInfo.rotation !== undefined) {
-                                childNode.rotation = childInfo.rotation;
-                            }
-                            // レイアウト情報
-                            if (childInfo.layoutAlign !== null && childInfo.layoutAlign !== undefined) {
-                                childNode.layoutAlign = childInfo.layoutAlign;
-                            }
-                            if (childInfo.layoutGrow !== null && childInfo.layoutGrow !== undefined) {
-                                childNode.layoutGrow = childInfo.layoutGrow;
-                            }
-                            // エフェクト
-                            if (childInfo.effects && Array.isArray(childInfo.effects)) {
-                                childNode.effects = childInfo.effects;
-                            }
-                            // ブレンドモード
-                            if (childInfo.blendMode !== null && childInfo.blendMode !== undefined) {
-                                childNode.blendMode = childInfo.blendMode;
-                            }
-                            // 透明度
-                            if (childInfo.opacity !== null && childInfo.opacity !== undefined) {
-                                childNode.opacity = childInfo.opacity;
-                            }
-                            // グループのサイズを設定
-                            childNode.resize(childInfo.width || 100, childInfo.height || 100);
-                            // 一時的なノードは削除しない（空のグループを維持するため）
-                            return childNode;
-                        }
-                        // 一時的な矩形を作成してグループ化
-                        const tempRect = figma.createRectangle();
-                        tempRect.name = 'temp';
-                        tempRect.resize(1, 1);
-                        tempRect.x = childInfo.x || 0;
-                        tempRect.y = childInfo.y || 0;
-                        // グループを作成
-                        childNode = figma.group([tempRect], figma.currentPage);
-                        childNode.name = childInfo.name || 'Nested Group';
-                        // 基本プロパティを設定
-                        if (childInfo.visible !== undefined) {
-                            childNode.visible = childInfo.visible;
-                        }
-                        if (childInfo.locked !== undefined) {
-                            childNode.locked = childInfo.locked;
-                        }
-                        // 回転
-                        if (childInfo.rotation !== null && childInfo.rotation !== undefined) {
-                            childNode.rotation = childInfo.rotation;
-                        }
-                        // レイアウト情報
-                        if (childInfo.layoutAlign !== null && childInfo.layoutAlign !== undefined) {
-                            childNode.layoutAlign = childInfo.layoutAlign;
-                        }
-                        if (childInfo.layoutGrow !== null && childInfo.layoutGrow !== undefined) {
-                            childNode.layoutGrow = childInfo.layoutGrow;
-                        }
-                        // エフェクト
-                        if (childInfo.effects && Array.isArray(childInfo.effects)) {
-                            childNode.effects = childInfo.effects;
-                        }
-                        // ブレンドモード
-                        if (childInfo.blendMode !== null && childInfo.blendMode !== undefined) {
-                            childNode.blendMode = childInfo.blendMode;
-                        }
-                        // 透明度
-                        if (childInfo.opacity !== null && childInfo.opacity !== undefined) {
-                            childNode.opacity = childInfo.opacity;
-                        }
-                        // 子ノードをグループに追加
-                        for (let i = 0; i < nestedChildNodes.length; i++) {
-                            const nestedChildNode = nestedChildNodes[i];
-                            const nestedChildInfo = childInfo.groupStructure.children[i];
-                            // グループに子ノードを追加
-                            childNode.appendChild(nestedChildNode);
-                            // グループ内での相対位置を設定
-                            const nestedRelativeX = nestedChildInfo.x || 0;
-                            const nestedRelativeY = nestedChildInfo.y || 0;
-                            nestedChildNode.x = nestedRelativeX;
-                            nestedChildNode.y = nestedRelativeY;
-                        }
-                        // 一時的なノードを削除
-                        tempRect.remove();
-                        // グループのサイズを子ノードに基づいて調整
-                        if (nestedChildNodes.length > 0) {
-                            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-                            for (const nestedChildNode of nestedChildNodes) {
-                                minX = Math.min(minX, nestedChildNode.x);
-                                minY = Math.min(minY, nestedChildNode.y);
-                                maxX = Math.max(maxX, nestedChildNode.x + nestedChildNode.width);
-                                maxY = Math.max(maxY, nestedChildNode.y + nestedChildNode.height);
-                            }
-                            const groupWidth = maxX - minX;
-                            const groupHeight = maxY - minY;
-                            // グループのサイズを設定（最小サイズを保証）
-                            childNode.resize(Math.max(groupWidth, childInfo.width || 100), Math.max(groupHeight, childInfo.height || 100));
-                        }
-                        else {
-                            // デフォルトサイズを設定
-                            childNode.resize(childInfo.width || 100, childInfo.height || 100);
-                        }
-                        return childNode;
-                    }
-                    else {
-                        // グループ構造がない場合は空のグループを作成
-                        const tempRect = figma.createRectangle();
-                        tempRect.name = 'temp';
-                        tempRect.resize(1, 1);
-                        tempRect.x = childInfo.x || 0;
-                        tempRect.y = childInfo.y || 0;
-                        childNode = figma.group([tempRect], figma.currentPage);
-                        childNode.name = childInfo.name || 'Empty Nested Group';
-                        // 基本プロパティを設定
-                        if (childInfo.visible !== undefined) {
-                            childNode.visible = childInfo.visible;
-                        }
-                        if (childInfo.locked !== undefined) {
-                            childNode.locked = childInfo.locked;
-                        }
-                        // 回転
-                        if (childInfo.rotation !== null && childInfo.rotation !== undefined) {
-                            childNode.rotation = childInfo.rotation;
-                        }
-                        // レイアウト情報
-                        if (childInfo.layoutAlign !== null && childInfo.layoutAlign !== undefined) {
-                            childNode.layoutAlign = childInfo.layoutAlign;
-                        }
-                        if (childInfo.layoutGrow !== null && childInfo.layoutGrow !== undefined) {
-                            childNode.layoutGrow = childInfo.layoutGrow;
-                        }
-                        // エフェクト
-                        if (childInfo.effects && Array.isArray(childInfo.effects)) {
-                            childNode.effects = childInfo.effects;
-                        }
-                        // ブレンドモード
-                        if (childInfo.blendMode !== null && childInfo.blendMode !== undefined) {
-                            childNode.blendMode = childInfo.blendMode;
-                        }
-                        // 透明度
-                        if (childInfo.opacity !== null && childInfo.opacity !== undefined) {
-                            childNode.opacity = childInfo.opacity;
-                        }
-                        // グループのサイズを設定
-                        childNode.resize(childInfo.width || 100, childInfo.height || 100);
-                        // 一時的なノードは削除しない（空のグループを維持するため）
-                        return childNode;
-                    }
-                default:
-                    console.warn(`Unsupported child node type: ${childInfo.type}, creating rectangle as fallback`);
-                    childNode = figma.createRectangle();
+                    // グループは子ノードを作成後に作成するため、一時的にフレームを作成
+                    node = figma.createFrame();
                     break;
+                default:
+                    throw new Error(`未対応のノードタイプ: ${nodeData.type}`);
             }
             // 基本プロパティを設定
-            childNode.name = childInfo.name || 'Child Node';
-            childNode.resize(childInfo.width || 50, childInfo.height || 50);
-            // 位置を設定（重要）
-            if (childInfo.x !== null && childInfo.x !== undefined) {
-                childNode.x = childInfo.x;
+            node.name = nodeData.name;
+            node.x = nodeData.x;
+            node.y = nodeData.y;
+            node.resize(nodeData.width, nodeData.height);
+            // ノード固有のプロパティを設定
+            yield this.applyNodeProperties(node, nodeData, imageMap);
+            // 子ノードを再帰的に作成
+            if (nodeData.children && nodeData.children.length > 0) {
+                const childNodes = [];
+                for (const childData of nodeData.children) {
+                    const childNode = yield this.createNodeFromData(childData, imageMap);
+                    childNodes.push(childNode);
+                }
+                if (nodeData.type === 'GROUP') {
+                    // グループの場合は、子ノードを作成後にグループを作成
+                    const group = figma.group(childNodes, figma.currentPage);
+                    group.name = nodeData.name;
+                    group.x = nodeData.x;
+                    group.y = nodeData.y;
+                    group.resize(nodeData.width, nodeData.height);
+                    return group;
+                }
+                else if (node.type === 'FRAME') {
+                    // フレームの場合は子ノードを追加
+                    const frame = node;
+                    for (const childNode of childNodes) {
+                        frame.appendChild(childNode);
+                    }
+                }
             }
-            if (childInfo.y !== null && childInfo.y !== undefined) {
-                childNode.y = childInfo.y;
-            }
-            // isMaskプロパティを設定（重要：マスク構造の復元に必要）
-            if (childInfo.isMask === true && 'isMask' in childNode) {
-                childNode.isMask = true;
-            }
-            // 塗りつぶし情報を設定
-            if (childInfo.fills && Array.isArray(childInfo.fills)) {
+            return node;
+        });
+    }
+    // 混合スタイルのテキストセグメントを適用
+    applyStyledTextSegments(textNode, styledSegments) {
+        return __awaiter(this, void 0, void 0, function* () {
+            console.log(`セグメント適用開始: ${styledSegments.length} セグメント`);
+            for (let i = 0; i < styledSegments.length; i++) {
+                const segment = styledSegments[i];
+                const start = segment.start;
+                const end = segment.end;
+                console.log(`セグメント ${i} を処理中: "${segment.characters}" (${start}-${end})`);
                 try {
-                    const cleanFills = childInfo.fills.map((fill) => {
-                        const cleanFill = Object.assign({}, fill);
-                        // グラデーション関連のプロパティを削除
-                        delete cleanFill.gradientStops;
-                        delete cleanFill.gradientTransform;
-                        // 画像フィルの場合は特別処理
-                        if (fill.type === 'IMAGE' && fill.imageHash) {
-                            return {
-                                type: 'IMAGE',
-                                visible: fill.visible !== false,
-                                opacity: fill.opacity || 1,
-                                imageHash: fill.imageHash,
-                                scaleMode: fill.scaleMode || 'FILL',
-                                imageTransform: fill.imageTransform || [[1, 0, 0], [0, 1, 0]]
-                            };
+                    // フォントを読み込む
+                    if (segment.fontName) {
+                        try {
+                            yield figma.loadFontAsync(segment.fontName);
+                            textNode.setRangeFontName(start, end, segment.fontName);
+                            console.log(`フォントを適用: ${segment.fontName.family} ${segment.fontName.style}`);
                         }
-                        return cleanFill;
-                    });
-                    childNode.fills = cleanFills;
+                        catch (error) {
+                            console.warn(`フォントの読み込みに失敗しました: ${segment.fontName}`, error);
+                            // デフォルトフォントでフォールバック
+                            try {
+                                yield figma.loadFontAsync({ family: "Inter", style: "Regular" });
+                                textNode.setRangeFontName(start, end, { family: "Inter", style: "Regular" });
+                            }
+                            catch (fallbackError) {
+                                console.error(`デフォルトフォントの読み込みにも失敗しました:`, fallbackError);
+                            }
+                        }
+                    }
+                    // その他のスタイルを適用
+                    if (segment.fontSize) {
+                        textNode.setRangeFontSize(start, end, segment.fontSize);
+                        console.log(`フォントサイズを適用: ${segment.fontSize}`);
+                    }
+                    if (segment.fills) {
+                        textNode.setRangeFills(start, end, segment.fills);
+                        console.log(`塗り色を適用`);
+                    }
+                    if (segment.letterSpacing) {
+                        textNode.setRangeLetterSpacing(start, end, segment.letterSpacing);
+                        console.log(`文字間隔を適用: ${segment.letterSpacing}`);
+                    }
+                    if (segment.lineHeight) {
+                        textNode.setRangeLineHeight(start, end, segment.lineHeight);
+                        console.log(`行間を適用: ${segment.lineHeight}`);
+                    }
+                    console.log(`セグメント ${i} の処理が完了しました`);
                 }
                 catch (error) {
-                    console.warn(`Failed to set fills for child: ${childNode.name}`, error);
+                    console.error(`セグメント ${i} の処理中にエラーが発生しました:`, error);
                 }
             }
-            // ストローク情報を設定
-            if (childInfo.strokes && Array.isArray(childInfo.strokes)) {
-                try {
-                    const cleanStrokes = childInfo.strokes.map((stroke) => {
-                        const cleanStroke = Object.assign({}, stroke);
-                        // 認識されないプロパティを削除
-                        delete cleanStroke.dashPattern;
-                        return cleanStroke;
-                    });
-                    childNode.strokes = cleanStrokes;
-                }
-                catch (error) {
-                    console.warn(`Failed to set strokes for child: ${childNode.name}`, error);
-                }
-            }
-            // エフェクト情報を設定
-            if (childInfo.effects && Array.isArray(childInfo.effects)) {
-                try {
-                    childNode.effects = childInfo.effects;
-                }
-                catch (error) {
-                    console.warn(`Failed to set effects for child: ${childNode.name}`, error);
-                }
-            }
-            // その他のプロパティを設定
-            if (childInfo.visible !== undefined) {
-                childNode.visible = childInfo.visible;
-            }
-            if (childInfo.locked !== undefined) {
-                childNode.locked = childInfo.locked;
-            }
-            if (childInfo.opacity !== null && childInfo.opacity !== undefined) {
-                childNode.opacity = childInfo.opacity;
-            }
-            if (childInfo.rotation !== null && childInfo.rotation !== undefined) {
-                childNode.rotation = childInfo.rotation;
-            }
-            if (childInfo.blendMode !== null && childInfo.blendMode !== undefined) {
-                childNode.blendMode = childInfo.blendMode;
-            }
-            // 図形固有のプロパティを設定
-            if (childInfo.type === 'RECTANGLE' && childInfo.cornerRadius !== null && childInfo.cornerRadius !== undefined) {
-                try {
-                    childNode.cornerRadius = childInfo.cornerRadius;
-                }
-                catch (error) {
-                    console.warn(`Failed to set corner radius for: ${childNode.name}`, error);
-                }
-            }
-            // 線の情報（LINEノード用）
-            if (childInfo.type === 'LINE') {
-                const lineNode = childNode;
-                if (childInfo.strokeWeight !== null && childInfo.strokeWeight !== undefined) {
-                    lineNode.strokeWeight = childInfo.strokeWeight;
-                }
-                if (childInfo.strokeAlign !== null && childInfo.strokeAlign !== undefined) {
-                    lineNode.strokeAlign = childInfo.strokeAlign;
-                }
-                if (childInfo.strokeCap !== null && childInfo.strokeCap !== undefined) {
-                    lineNode.strokeCap = childInfo.strokeCap;
-                }
-                if (childInfo.strokeJoin !== null && childInfo.strokeJoin !== undefined) {
-                    lineNode.strokeJoin = childInfo.strokeJoin;
-                }
-                if (childInfo.dashPattern !== null && childInfo.dashPattern !== undefined) {
-                    lineNode.dashPattern = childInfo.dashPattern;
-                }
-            }
-            // 多角形の情報（POLYGONノード用）
-            if (childInfo.type === 'POLYGON' && childInfo.pointCount !== null && childInfo.pointCount !== undefined) {
-                childNode.pointCount = childInfo.pointCount;
-            }
-            // 星の情報（STARノード用）
-            if (childInfo.type === 'STAR' && childInfo.innerRadius !== null && childInfo.innerRadius !== undefined) {
-                childNode.innerRadius = childInfo.innerRadius;
-            }
-            // テキストノードの場合はテキスト情報も設定
-            if (childInfo.type === 'TEXT') {
-                const textNode = childNode;
-                // フォント情報（テキスト内容を設定する前に必要）
-                if (childInfo.fontName && typeof childInfo.fontName === 'object') {
+            console.log(`すべてのセグメントの処理が完了しました`);
+        });
+    }
+    // ノードのプロパティを適用
+    applyNodeProperties(node, nodeData, imageMap) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (!nodeData.properties)
+                return;
+            const props = nodeData.properties;
+            // テキストノードの処理
+            if (node.type === 'TEXT') {
+                const textNode = node;
+                // フォントを先に読み込む（確実に完了するまで待機）
+                let fontLoaded = false;
+                if (props.fontName && props.fontName !== figma.mixed) {
                     try {
-                        yield figma.loadFontAsync(childInfo.fontName);
-                        textNode.fontName = childInfo.fontName;
+                        yield figma.loadFontAsync(props.fontName);
+                        textNode.fontName = props.fontName;
+                        fontLoaded = true;
+                        console.log(`フォントを読み込みました: ${props.fontName.family} ${props.fontName.style}`);
                     }
                     catch (error) {
-                        console.warn(`Failed to load font: ${childInfo.fontName.family} ${childInfo.fontName.style}`, error);
+                        console.warn(`フォントの読み込みに失敗しました: ${props.fontName}`, error);
                         // フォント読み込みに失敗した場合はデフォルトフォントを使用
                         try {
                             yield figma.loadFontAsync({ family: "Inter", style: "Regular" });
                             textNode.fontName = { family: "Inter", style: "Regular" };
+                            fontLoaded = true;
+                            console.log(`デフォルトフォントを読み込みました: Inter Regular`);
                         }
                         catch (fallbackError) {
-                            console.error('Failed to load fallback font:', fallbackError);
+                            console.error(`デフォルトフォントの読み込みにも失敗しました:`, fallbackError);
                         }
                     }
                 }
-                // テキスト内容（フォント読み込み後に実行）
-                if (childInfo.textContent) {
+                else {
+                    // フォント名がない場合はデフォルトフォントを使用
                     try {
-                        textNode.characters = childInfo.textContent;
+                        yield figma.loadFontAsync({ family: "Inter", style: "Regular" });
+                        textNode.fontName = { family: "Inter", style: "Regular" };
+                        fontLoaded = true;
+                        console.log(`デフォルトフォントを読み込みました: Inter Regular`);
                     }
                     catch (error) {
-                        console.warn(`Failed to set text content: "${childInfo.textContent}"`, error);
+                        console.error(`デフォルトフォントの読み込みに失敗しました:`, error);
                     }
                 }
-                // フォントサイズ
-                if (childInfo.fontSize !== null && childInfo.fontSize !== undefined) {
-                    textNode.fontSize = childInfo.fontSize;
-                }
-                // 行の高さ
-                if (childInfo.lineHeight !== null && childInfo.lineHeight !== undefined) {
-                    textNode.lineHeight = childInfo.lineHeight;
-                }
-                // 文字間隔
-                if (childInfo.letterSpacing !== null && childInfo.letterSpacing !== undefined) {
-                    textNode.letterSpacing = childInfo.letterSpacing;
-                }
-                // テキスト配置
-                if (childInfo.textAlignHorizontal !== null && childInfo.textAlignHorizontal !== undefined) {
-                    textNode.textAlignHorizontal = childInfo.textAlignHorizontal;
-                }
-                if (childInfo.textAlignVertical !== null && childInfo.textAlignVertical !== undefined) {
-                    textNode.textAlignVertical = childInfo.textAlignVertical;
-                }
-                // テキスト自動リサイズ
-                if (childInfo.textAutoResize !== null && childInfo.textAutoResize !== undefined) {
-                    textNode.textAutoResize = childInfo.textAutoResize;
-                }
-                // テキストケース
-                if (childInfo.textCase !== null && childInfo.textCase !== undefined) {
-                    textNode.textCase = childInfo.textCase;
-                }
-                // テキスト装飾
-                if (childInfo.textDecoration !== null && childInfo.textDecoration !== undefined) {
-                    textNode.textDecoration = childInfo.textDecoration;
-                }
-                // 段落インデント
-                if (childInfo.paragraphIndent !== null && childInfo.paragraphIndent !== undefined) {
-                    textNode.paragraphIndent = childInfo.paragraphIndent;
-                }
-                // 段落間隔
-                if (childInfo.paragraphSpacing !== null && childInfo.paragraphSpacing !== undefined) {
-                    textNode.paragraphSpacing = childInfo.paragraphSpacing;
-                }
-                // テキストの塗りつぶし
-                if (childInfo.textFills && Array.isArray(childInfo.textFills)) {
+                // フォントが読み込まれた後にテキストを設定
+                if (fontLoaded && props.characters) {
                     try {
-                        const cleanTextFills = childInfo.textFills.map((fill) => {
-                            const cleanFill = Object.assign({}, fill);
-                            // グラデーション関連のプロパティを削除
-                            delete cleanFill.gradientStops;
-                            delete cleanFill.gradientTransform;
-                            return cleanFill;
-                        });
-                        textNode.fills = cleanTextFills;
+                        textNode.characters = props.characters;
+                        console.log(`テキストを設定しました: ${props.characters}`);
                     }
                     catch (error) {
-                        console.warn(`Failed to set text fills for: ${textNode.name}`, error);
+                        console.error(`テキストの設定中にエラーが発生しました: ${props.characters}`, error);
                     }
                 }
-                // テキストのストローク
-                if (childInfo.textStrokes && Array.isArray(childInfo.textStrokes)) {
-                    try {
-                        const cleanTextStrokes = childInfo.textStrokes.map((stroke) => {
-                            const cleanStroke = Object.assign({}, stroke);
-                            // 認識されないプロパティを削除
-                            delete cleanStroke.dashPattern;
-                            return cleanStroke;
-                        });
-                        textNode.strokes = cleanTextStrokes;
-                    }
-                    catch (error) {
-                        console.warn(`Failed to set text strokes for: ${textNode.name}`, error);
-                    }
+                // 混合スタイルの処理
+                if (props.styledSegments && Array.isArray(props.styledSegments)) {
+                    console.log(`混合スタイルを復元中: ${props.styledSegments.length} セグメント`);
+                    yield this.applyStyledTextSegments(textNode, props.styledSegments);
                 }
-                // テキストのエフェクト
-                if (childInfo.textEffects && Array.isArray(childInfo.textEffects)) {
-                    try {
-                        textNode.effects = childInfo.textEffects;
-                    }
-                    catch (error) {
-                        console.warn(`Failed to set text effects for: ${textNode.name}`, error);
+                else {
+                    // 単一スタイルの処理（フォント読み込み後に実行）
+                    if (fontLoaded) {
+                        if (props.fontSize && props.fontSize !== figma.mixed) {
+                            try {
+                                textNode.fontSize = props.fontSize;
+                            }
+                            catch (error) {
+                                console.error(`フォントサイズの設定中にエラーが発生しました:`, error);
+                            }
+                        }
+                        if (props.fills && props.fills !== figma.mixed) {
+                            textNode.fills = props.fills;
+                        }
+                        if (props.strokes && props.strokes !== figma.mixed) {
+                            textNode.strokes = props.strokes;
+                        }
+                        if (props.strokeWeight && props.strokeWeight !== figma.mixed) {
+                            textNode.strokeWeight = props.strokeWeight;
+                        }
+                        if (props.textAlignHorizontal && props.textAlignHorizontal !== figma.mixed) {
+                            textNode.textAlignHorizontal = props.textAlignHorizontal;
+                        }
+                        if (props.textAlignVertical && props.textAlignVertical !== figma.mixed) {
+                            textNode.textAlignVertical = props.textAlignVertical;
+                        }
+                        if (props.lineHeight && props.lineHeight !== figma.mixed) {
+                            textNode.lineHeight = props.lineHeight;
+                        }
+                        if (props.letterSpacing && props.letterSpacing !== figma.mixed) {
+                            textNode.letterSpacing = props.letterSpacing;
+                        }
                     }
                 }
             }
-            return childNode;
+            // 図形ノードの処理
+            if (node.type === 'RECTANGLE' || node.type === 'ELLIPSE' ||
+                node.type === 'POLYGON' || node.type === 'STAR' ||
+                node.type === 'VECTOR' || node.type === 'LINE') {
+                if (props.fills)
+                    node.fills = props.fills;
+                if (props.strokes)
+                    node.strokes = props.strokes;
+                if (props.strokeWeight)
+                    node.strokeWeight = props.strokeWeight;
+                if (props.cornerRadius && 'cornerRadius' in node) {
+                    node.cornerRadius = props.cornerRadius;
+                }
+            }
+            // フレームの処理
+            if (node.type === 'FRAME') {
+                const frame = node;
+                if (props.backgrounds)
+                    frame.backgrounds = props.backgrounds;
+                if (props.layoutMode)
+                    frame.layoutMode = props.layoutMode;
+                if (props.paddingLeft)
+                    frame.paddingLeft = props.paddingLeft;
+                if (props.paddingRight)
+                    frame.paddingRight = props.paddingRight;
+                if (props.paddingTop)
+                    frame.paddingTop = props.paddingTop;
+                if (props.paddingBottom)
+                    frame.paddingBottom = props.paddingBottom;
+                if (props.itemSpacing)
+                    frame.itemSpacing = props.itemSpacing;
+            }
+            // 画像の処理
+            if (nodeData.imageData && imageMap[nodeData.imageData]) {
+                try {
+                    const imageBytes = this.base64ToUint8Array(imageMap[nodeData.imageData]);
+                    const image = figma.createImage(imageBytes);
+                    if (node.type === 'RECTANGLE') {
+                        const rect = node;
+                        rect.fills = [{
+                                type: 'IMAGE',
+                                imageHash: image.hash,
+                                scaleMode: 'FILL'
+                            }];
+                    }
+                }
+                catch (error) {
+                    console.error('画像の適用中にエラーが発生しました:', error);
+                }
+            }
+        });
+    }
+    // Base64をUint8Arrayに変換
+    base64ToUint8Array(base64) {
+        const binaryString = atob(base64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
         }
-        catch (error) {
-            console.error(`Failed to create child node: ${childInfo.name}`, error);
-            throw new Error(`子ノードの作成に失敗しました: ${childInfo.name} - ${error.message}`);
-        }
-    });
+        return bytes;
+    }
+    // インポート実行
+    importDesign(designData, imageMap) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const createdNodes = [];
+            for (const nodeData of designData.nodes) {
+                try {
+                    const node = yield this.createNodeFromData(nodeData, imageMap);
+                    createdNodes.push(node);
+                }
+                catch (error) {
+                    console.error(`ノードの作成中にエラーが発生しました: ${nodeData.name}`, error);
+                }
+            }
+            // 作成されたノードを選択状態にする
+            if (createdNodes.length > 0) {
+                figma.currentPage.selection = createdNodes;
+                figma.viewport.scrollAndZoomIntoView(createdNodes);
+            }
+        });
+    }
 }
+// メイン処理
+const exporter = new DesignExporter();
+const importer = new DesignImporter();
+figma.showUI(__html__, { width: 400, height: 300 });
+figma.ui.onmessage = (msg) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        console.log('メッセージ受信:', msg.type);
+        switch (msg.type) {
+            case 'export':
+                console.log('エクスポート開始:', msg.target);
+                const designData = yield exporter.exportDesign(msg.target);
+                // 画像処理の結果を報告
+                const imageCount = Object.keys(designData.images).length;
+                console.log('エクスポート成功, 画像数:', imageCount);
+                figma.ui.postMessage({
+                    type: 'export-success',
+                    data: designData,
+                    imageCount: imageCount
+                });
+                break;
+            case 'import':
+                console.log('インポート開始');
+                yield importer.importDesign(msg.designData, msg.imageMap);
+                console.log('インポート成功');
+                figma.ui.postMessage({ type: 'import-success' });
+                break;
+            default:
+                throw new Error(`未対応のメッセージタイプ: ${msg.type}`);
+        }
+    }
+    catch (error) {
+        console.error('メッセージ処理中にエラーが発生しました:', error);
+        console.error('エラーの詳細:', error.message, error.stack);
+        const errorMessage = error.message || String(error);
+        figma.ui.postMessage({
+            type: msg.type === 'export' ? 'export-error' : 'import-error',
+            message: errorMessage
+        });
+    }
+});

@@ -1,6 +1,6 @@
 {
-  "name": "ZIP Import/Export Plugin",
-  "id": "zip-import-export-plugin",
+  "name": "Figma Bridge",
+  "id": "figma-bridge-plugin",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",
