@@ -1,44 +1,23 @@
-# Figma Bridge
+これは、figma pluginである「Figma Bridge」の仕様です。
+# 機能
+- エクスポート
+  - 「指定したノード」や「現在のページ」の2択でエクスポート対象を指定できる
+  - ZIP形式「json（design.json） + image Data(/img)」でエクスポートする
+- インポート
+  - エクスポートしたZIPを別のfigmaでインポートし、エクスポート元のデザインを再現できる
 
-> **Figmaのノード/ページ/ファイルのインポート・エクスポートをするプラグイン**
+# 再現するデザインの対象
+- フレーム
+- 文字
+  - 一つのオブジェクトのテキスト中のフォント、文字色、形態は変化する
+- 円、四角、三角、線、矢印などの全ての図形
+- 画像
+  - 画像オブジェクトはエクスポート時に/imgに格納し、インポート時は/imgをfigma上にアップロードし、アップロードした際に取得できるハッシュ値を使って再現する
+- グループ化
+- マスク処理
 
----
-
-## フォルダ構成
-
-```plaintext
-./figma
-  ├─ manifest.json   # プラグインのマニフェスト
-  ├─ code.ts        # TypeScriptソース（編集推奨）
-  ├─ code.js        # ビルド後のJavaScript（Figmaで実行）
-  └─ ui.html        # プラグインのUI
-./tsconfig.json     # TypeScriptビルド設定
-./package.json      # 依存・スクリプト
-```
-
-## 機能
-- Zip形式で、Fimgaのノード/ページ/ファイルのインポート・エクスポートを行います。
-
-## 使い方
-
-```sh
-npm install
-npx tsc
-```
-
-1. 上記コマンドで依存をインストール＆ビルド
-2. Figmaで「figma」フォルダをプラグインとして読み込む
-3. プラグインを実行する
-
-## ビルド・開発
-- TypeScriptで開発し、`npx tsc` で `code.js` を生成
-- 型定義は `@figma/plugin-typings` を利用
-- `figma/tsconfig.json` は不要です（ルートのtsconfig.jsonのみでOK）
-
-## カスタマイズ
-- `figma/code.ts` に独自の処理を追加できます
-- `figma/ui.html` のUIを自由に編集できます
-
----
-
-このテンプレートをベースに、さまざまなFigmaプラグイン開発にご活用ください。 
+# 開発の際の制限
+- 使用出来るファイルは、code.tsとui.htmlだけ
+- SOLID原則を意識し、変更に強い設計にする
+- Figmaのデザインは階層構造なので、木構造を用いた再帰的なjson構造で実装する
+- ZIPの生成には<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>を使い、ZIPの作成と解凍＋読み込みはui.htmlで行ってください。
