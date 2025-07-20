@@ -54,10 +54,27 @@ class DesignExporter {
             yield this.processNodeImagesForExport(node);
             // 子ノードがある場合は再帰的に処理
             if ('children' in node && node.children) {
+                // --- マスクグループ判定 ---
+                let hasMask = false;
+                for (const child of node.children) {
+                    if ('isMask' in child && child.isMask) {
+                        hasMask = true;
+                        break;
+                    }
+                }
+                if ((node.type === 'GROUP' || node.type === 'FRAME') && hasMask) {
+                    designNode.maskGroup = true;
+                }
+                // --- isMask: trueを必ずDesignNodeに付与 ---
+                designNode.children = yield Promise.all(node.children.map((child) => __awaiter(this, void 0, void 0, function* () {
+                    const childNode = yield this.serializeNode(child, depth + 1, node.type, node.x, node.y);
+                    if ('isMask' in child && child.isMask) {
+                        childNode.isMask = true;
+                    }
+                    return childNode;
+                })));
                 if (node.type === 'GROUP') {
                     // グループの子は相対座標で保存
-                    designNode.children = yield Promise.all(node.children.map(child => this.serializeNode(child, depth + 1, node.type, node.x, node.y)));
-                    // 各子のx/yを相対座標に変換
                     if (designNode.children) {
                         for (const child of designNode.children) {
                             child.x = child.x - node.x;
@@ -65,8 +82,8 @@ class DesignExporter {
                         }
                     }
                 }
-                else {
-                    designNode.children = yield Promise.all(node.children.map(child => this.serializeNode(child, depth + 1, node.type, node.x, node.y)));
+                else if (node.type === 'BOOLEAN_OPERATION') {
+                    // マスクグループの子はisMask情報も保存（上記で付与済み）
                 }
             }
             // 画像処理後にプロパティを取得
@@ -457,6 +474,9 @@ class DesignImporter {
                 case 'FRAME':
                     node = figma.createFrame();
                     break;
+                case 'GROUP':
+                    node = figma.createFrame();
+                    break;
                 case 'TEXT':
                     node = figma.createText();
                     break;
@@ -478,57 +498,145 @@ class DesignImporter {
                 case 'LINE':
                     node = figma.createLine();
                     break;
-                case 'GROUP':
-                    // グループは子ノードを作成後に作成するため、一時的にフレームを作成
-                    node = figma.createFrame();
+                case 'BOOLEAN_OPERATION':
+                    // マスクグループは一時的にnull、後でグループ化
+                    node = null;
                     break;
                 default:
+                    console.error('createNodeFromData: 未対応のノードタイプ', nodeData.type, nodeData);
                     throw new Error(`未対応のノードタイプ: ${nodeData.type}`);
             }
             // 基本プロパティを設定
-            node.name = nodeData.name;
-            if (nodeData.type === 'GROUP') {
-                node.x = nodeData.x + parentAbsX;
-                node.y = nodeData.y + parentAbsY;
+            if (node && node !== null) {
+                node.name = nodeData.name;
+                if (nodeData.type === 'GROUP') {
+                    node.x = nodeData.x + parentAbsX;
+                    node.y = nodeData.y + parentAbsY;
+                }
+                else {
+                    node.x = nodeData.x;
+                    node.y = nodeData.y;
+                }
+                if ('resize' in node && typeof node.resize === 'function') {
+                    node.resize(nodeData.width, nodeData.height);
+                }
             }
-            else {
-                node.x = nodeData.x;
-                node.y = nodeData.y;
-            }
-            node.resize(nodeData.width, nodeData.height);
             // ノード固有のプロパティを設定
-            yield this.applyNodeProperties(node, nodeData, imageMap);
-            // 画像を適用
-            yield this.applyImageToNode(node, nodeData, imageMap);
+            if (node && node !== null) {
+                yield this.applyNodeProperties(node, nodeData, imageMap);
+                yield this.applyImageToNode(node, nodeData, imageMap);
+            }
             // 子ノードを再帰的に作成
             if (nodeData.children && nodeData.children.length > 0) {
                 console.log('createNodeFromData children', { id: nodeData.id, count: nodeData.children.length, depth });
                 const childNodes = [];
                 for (const childData of nodeData.children) {
                     try {
-                        console.log('createNodeFromData RECURSE ENTER', { parentId: nodeData.id, childId: childData.id, depth: depth + 1 });
+                        console.log('createNodeFromData RECURSE ENTER', { parentId: nodeData.id, childId: childData.id, type: childData.type, depth: depth + 1 });
                         let childNode;
-                        if (nodeData.type === 'GROUP') {
-                            // グループの子は相対→絶対
+                        if (nodeData.type === 'GROUP' && !nodeData.maskGroup) {
                             childNode = yield this.createNodeFromData(childData, imageMap, depth + 1, node.x, node.y);
                         }
-                        else {
-                            // それ以外は絶対座標のまま
+                        else if (nodeData.type === 'BOOLEAN_OPERATION' || nodeData.maskGroup) {
                             childNode = yield this.createNodeFromData(childData, imageMap, depth + 1, 0, 0);
+                        }
+                        else {
+                            childNode = yield this.createNodeFromData(childData, imageMap, depth + 1, 0, 0);
+                        }
+                        if (!childNode) {
+                            console.error('createNodeFromData: childNode is null', { parentId: nodeData.id, childId: childData.id, type: childData.type });
+                            continue;
                         }
                         childNodes.push(childNode);
                         console.log('createNodeFromData RECURSE EXIT', { parentId: nodeData.id, childId: childData.id, depth: depth + 1 });
                     }
                     catch (e) {
-                        console.error('createNodeFromData RECURSE ERROR', { parentId: nodeData.id, childId: childData.id, depth: depth + 1, error: e });
+                        const err = e;
+                        console.error('createNodeFromData RECURSE ERROR', {
+                            parentId: nodeData.id,
+                            childId: childData.id,
+                            type: childData.type,
+                            depth: depth + 1,
+                            error: e,
+                            message: err && err.message,
+                            stack: err && err.stack
+                        });
+                        // pushしない
                     }
                 }
-                // GROUPもFRAME同様にappendChildで子ノードを追加
-                if (nodeData.type === 'GROUP' || node.type === 'FRAME') {
+                // グループ化前にnull/undefined除去
+                const validChildNodes = childNodes.filter(n => n);
+                if (nodeData.type === 'GROUP' || (node && node.type === 'FRAME')) {
                     const frame = node;
-                    for (const childNode of childNodes) {
+                    for (const childNode of validChildNodes) {
                         frame.appendChild(childNode);
                     }
+                }
+                else if (nodeData.type === 'BOOLEAN_OPERATION' || nodeData.maskGroup) {
+                    if (validChildNodes.length === 0) {
+                        throw new Error('in group: No valid child nodes to group');
+                    }
+                    // isMask: trueの子を先頭に
+                    if (nodeData.children) {
+                        const maskIndex = nodeData.children.findIndex(c => c.isMask);
+                        if (maskIndex > 0) {
+                            const maskNode = validChildNodes.splice(maskIndex, 1)[0];
+                            validChildNodes.unshift(maskNode);
+                        }
+                    }
+                    // children配列の順序通りにappend
+                    for (let i = 0; i < validChildNodes.length; i++) {
+                        figma.currentPage.appendChild(validChildNodes[i]);
+                    }
+                    const group = figma.group(validChildNodes, figma.currentPage);
+                    group.name = nodeData.name;
+                    group.x = nodeData.x;
+                    group.y = nodeData.y;
+                    // グループ化後に一番上のノードにisMask=trueをセット
+                    if (group.children.length > 0 && nodeData.children && nodeData.children[0].isMask && 'isMask' in group.children[0]) {
+                        group.children[0].isMask = true;
+                    }
+                    // maskGroup: trueのFRAMEやGROUPの場合はフレーム本体を生成し、その中にグループ化したマスク要素をappendChild
+                    if (nodeData.maskGroup && (nodeData.type === 'FRAME' || nodeData.type === 'GROUP')) {
+                        // 1. FRAMEノードを生成
+                        const frame = figma.createFrame();
+                        frame.name = nodeData.name;
+                        frame.x = nodeData.x;
+                        frame.y = nodeData.y;
+                        frame.resize(nodeData.width, nodeData.height);
+                        // 2. isMask: trueのノードをvalidChildNodesの先頭に
+                        if (nodeData.children) {
+                            const maskIndex = nodeData.children.findIndex(c => c.isMask);
+                            if (maskIndex > 0) {
+                                const maskNode = validChildNodes.splice(maskIndex, 1)[0];
+                                validChildNodes.unshift(maskNode);
+                            }
+                        }
+                        // 3. まず全ての子ノードをframeにappend
+                        for (let i = 0; i < validChildNodes.length; i++) {
+                            frame.appendChild(validChildNodes[i]);
+                        }
+                        // 4. frame.childrenを配列化してグループ化
+                        let groupNodes = Array.from(frame.children);
+                        // null/undefined除去
+                        groupNodes = groupNodes.filter(n => n);
+                        // デバッグ: groupNodesの内容を出力
+                        console.log('groupNodes for maskGroup:', groupNodes.map(n => ({ id: n.id, name: n.name, type: n.type })));
+                        // 型チェック
+                        if (groupNodes.length === 0 || groupNodes.some(n => !n || typeof n.id !== 'string')) {
+                            throw new Error('No valid nodes to group for maskGroup');
+                        }
+                        const group = figma.group(groupNodes, frame);
+                        group.name = nodeData.name + ' MaskGroup';
+                        group.x = 0;
+                        group.y = 0;
+                        // 5. グループ化直後に一番上のノードにisMask=trueをセット
+                        if (group.children.length > 0 && nodeData.children && nodeData.children[0].isMask && 'isMask' in group.children[0]) {
+                            group.children[0].isMask = true;
+                        }
+                        return frame;
+                    }
+                    return group;
                 }
             }
             console.log('createNodeFromData END', { id: nodeData.id, name: nodeData.name, type: nodeData.type, depth });
