@@ -23,9 +23,21 @@ interface DesignData {
 // エクスポート機能のクラス
 class DesignExporter {
   private imageCounter = 0;
+  private imageHashToFileName: { [hash: string]: string } = {};
+  private imagesForExport: { [key: string]: string } = {}; // エクスポート用の画像データを一時的に保存
 
   // ノードをデザインデータに変換
-  private serializeNode(node: SceneNode): DesignNode {
+  private async serializeNode(node: SceneNode, depth = 0, parentType = '', parentX = 0, parentY = 0): Promise<DesignNode> {
+    if (node.type === 'GROUP') {
+      console.log('[serializeNode] GROUPノード', {
+        name: node.name,
+        id: node.id,
+        parentType,
+        depth,
+        childrenCount: 'children' in node && node.children ? node.children.length : 0
+      });
+    }
+    // グループの子要素は相対座標で保存
     const designNode: DesignNode = {
       id: node.id,
       name: node.name,
@@ -33,16 +45,77 @@ class DesignExporter {
       x: node.x,
       y: node.y,
       width: node.width,
-      height: node.height,
-      properties: this.getNodeProperties(node)
+      height: node.height
+      // imageDataは廃止
     };
+
+    // 画像処理を先に行い、画像保存・マッピングのみ行う
+    await this.processNodeImagesForExport(node);
 
     // 子ノードがある場合は再帰的に処理
     if ('children' in node && node.children) {
-      designNode.children = node.children.map(child => this.serializeNode(child));
+      if (node.type === 'GROUP') {
+        // グループの子は相対座標で保存
+        designNode.children = await Promise.all(node.children.map(child => this.serializeNode(child, depth + 1, node.type, node.x, node.y)));
+        // 各子のx/yを相対座標に変換
+        if (designNode.children) {
+          for (const child of designNode.children) {
+            child.x = child.x - node.x;
+            child.y = child.y - node.y;
+          }
+        }
+      } else {
+        designNode.children = await Promise.all(node.children.map(child => this.serializeNode(child, depth + 1, node.type, node.x, node.y)));
+      }
     }
 
+    // 画像処理後にプロパティを取得
+    designNode.properties = this.getNodeProperties(node);
+
     return designNode;
+  }
+
+  // 画像保存・マッピングのみ行う（imageDataはセットしない）
+  private async processNodeImagesForExport(node: SceneNode): Promise<void> {
+    try {
+      await this.processNodeImagesForExportSingle(node);
+      if ('children' in node && node.children) {
+        for (const child of node.children) {
+          try {
+            await this.processNodeImagesForExport(child);
+          } catch (error) {}
+        }
+      }
+    } catch (error) {}
+  }
+
+  // 個別ノードの画像を処理（エクスポート用）
+  private async processNodeImagesForExportSingle(node: SceneNode): Promise<void> {
+    try {
+      if ('fills' in node && node.fills && Array.isArray(node.fills)) {
+        const fills = node.fills as Paint[];
+        for (const fill of fills) {
+          if (fill.type === 'IMAGE' && fill.imageHash) {
+            let imageName: string;
+            if (this.imageHashToFileName[fill.imageHash]) {
+              imageName = this.imageHashToFileName[fill.imageHash];
+            } else {
+              imageName = `img/image_${this.imageCounter}.png`;
+              this.imageHashToFileName[fill.imageHash] = imageName;
+              const image = figma.getImageByHash(fill.imageHash);
+              if (image) {
+                const imageBytes = await image.getBytesAsync();
+                const base64Data = this.arrayBufferToBase64(imageBytes);
+                this.imagesForExport[imageName] = base64Data;
+                this.imageCounter++;
+              }
+            }
+            break; // 画像fillがあれば最初の1つだけ
+          }
+        }
+      }
+      // strokes, backgroundsも同様に必要なら追加
+    } catch (error) {}
   }
 
   // ノードのプロパティを取得
@@ -67,15 +140,12 @@ class DesignExporter {
       try {
         const segments = textNode.getStyledTextSegments(['fontName']);
         hasMixedStylesSafe = segments.length > 1;
-        console.log(`混合スタイル検出: ${node.name}, セグメント数: ${segments.length}, 混合: ${hasMixedStylesSafe}`);
       } catch (error) {
         hasMixedStylesSafe = hasMixedStyles;
-        console.warn(`混合スタイル検出でエラー: ${node.name}`, error);
       }
       
                     if (hasMixedStylesSafe) {
         // 混合スタイルの場合はセグメント情報を保存
-        console.log(`混合スタイルを処理中: ${node.name}`);
         try {
           const segments = textNode.getStyledTextSegments([
             'fontName',
@@ -85,11 +155,8 @@ class DesignExporter {
             'lineHeight'
           ]);
           
-          console.log(`セグメント数: ${segments.length}`, segments);
-          
           // セグメント情報をシリアライズ可能な形式に変換
-          properties.styledSegments = segments.map((segment, index) => {
-            console.log(`セグメント ${index}:`, segment);
+          properties.styledSegments = segments.map((segment) => {
             return {
               characters: segment.characters,
               start: segment.start,
@@ -101,11 +168,7 @@ class DesignExporter {
               lineHeight: segment.lineHeight
             };
           });
-          
-          console.log(`混合スタイルの処理が完了しました: ${node.name}`);
         } catch (error) {
-          console.error(`混合スタイルの処理中にエラーが発生しました: ${node.name}`, error);
-          console.error('エラーの詳細:', (error as Error).message, (error as Error).stack);
           // エラーが発生した場合は単一スタイルとして処理
           try {
             if (typeof textNode.fontSize === 'number') properties.fontSize = textNode.fontSize;
@@ -118,7 +181,7 @@ class DesignExporter {
             if (typeof textNode.lineHeight === 'number' || typeof textNode.lineHeight === 'object') properties.lineHeight = textNode.lineHeight;
             if (typeof textNode.letterSpacing === 'number' || typeof textNode.letterSpacing === 'object') properties.letterSpacing = textNode.letterSpacing;
           } catch (fallbackError) {
-            console.warn(`フォールバック処理中にエラーが発生しました: ${node.name}`, fallbackError);
+            // フォールバック処理も失敗した場合は何もしない
           }
         }
       } else {
@@ -143,7 +206,17 @@ class DesignExporter {
     if (node.type === 'RECTANGLE' || node.type === 'ELLIPSE' || 
         node.type === 'POLYGON' || node.type === 'STAR' || 
         node.type === 'VECTOR' || node.type === 'LINE') {
-      properties.fills = node.fills;
+      if (node.fills && Array.isArray(node.fills)) {
+        properties.fills = node.fills.map((fill: any) => {
+          if (fill.type === 'IMAGE' && fill.imageHash) {
+            // imageHashを除外し、imageData（画像ファイルパス）をimageHashToFileNameから取得
+            const { imageHash, ...rest } = fill;
+            const imageData = this.imageHashToFileName[fill.imageHash] || '';
+            return { ...rest, imageData };
+          }
+          return fill;
+        });
+      }
       properties.strokes = node.strokes;
       properties.strokeWeight = node.strokeWeight;
       properties.cornerRadius = 'cornerRadius' in node ? node.cornerRadius : undefined;
@@ -174,117 +247,106 @@ class DesignExporter {
   }
 
   // 画像ノードの処理
-  private async processImageNode(node: SceneNode): Promise<{ node: DesignNode, images: { [key: string]: string } }> {
+  private async processNodeImages(node: SceneNode, designNode: DesignNode, imagePaths: string[], images: { [key: string]: string }): Promise<void> {
     try {
-    const images: { [key: string]: string } = {};
-    let designNode = this.serializeNode(node);
-
-    // 現在のノードの画像を処理
-    await this.processNodeImages(node, designNode, images);
-
-    // 子ノードの画像を再帰的に処理
-    if ('children' in node && node.children) {
-      for (const child of node.children) {
-          try {
-        const childImages = await this.processImageNode(child);
-        Object.assign(images, childImages.images);
-          } catch (error) {
-            console.error(`子ノード処理中にエラーが発生しました: ${child.name}`, error);
-          }
-      }
-    }
-
-    return { node: designNode, images };
-    } catch (error) {
-      console.error(`processImageNodeでエラーが発生しました: ${node.name}`, error);
-      // エラーが発生した場合でも基本的なノード情報は返す
-      const designNode = this.serializeNode(node);
-      return { node: designNode, images: {} };
-    }
-  }
-
-  // 個別ノードの画像を処理
-  private async processNodeImages(node: SceneNode, designNode: DesignNode, images: { [key: string]: string }): Promise<void> {
-    try {
-    // 塗り（fills）の画像を処理
+      // 塗り（fills）の画像を処理
       if ('fills' in node && node.fills && Array.isArray(node.fills)) {
-      const fills = node.fills as Paint[];
-      for (const fill of fills) {
-        if (fill.type === 'IMAGE' && fill.imageHash) {
-          try {
-            const image = figma.getImageByHash(fill.imageHash);
-            if (image) {
-              const imageBytes = await image.getBytesAsync();
-              const imageName = `img/image_${this.imageCounter}.png`;
-              const base64Data = this.arrayBufferToBase64(imageBytes);
-              images[imageName] = base64Data;
-              designNode.imageData = imageName;
-              this.imageCounter++;
-              console.log(`画像を処理しました: ${imageName} (ノード: ${node.name}, サイズ: ${imageBytes.byteLength} bytes)`);
+        const fills = node.fills as Paint[];
+        for (const fill of fills) {
+          if (fill.type === 'IMAGE' && fill.imageHash) {
+            let imageName: string;
+            if (this.imageHashToFileName[fill.imageHash]) {
+              imageName = this.imageHashToFileName[fill.imageHash];
+            } else {
+              imageName = `img/image_${this.imageCounter}.png`;
+              this.imageHashToFileName[fill.imageHash] = imageName;
+              const image = figma.getImageByHash(fill.imageHash);
+              if (image) {
+                const imageBytes = await image.getBytesAsync();
+                const base64Data = this.arrayBufferToBase64(imageBytes);
+                images[imageName] = base64Data;
+                // デバッグ: 画像保存時の情報を出力
+                console.log('[画像保存]', {
+                  imageHash: fill.imageHash,
+                  imageName,
+                  nodeName: node.name,
+                  nodeId: node.id
+                });
+                this.imageCounter++;
+              }
             }
-          } catch (error) {
-            console.error(`画像の処理中にエラーが発生しました (ノード: ${node.name}):`, error);
+            designNode.imageData = imageName;
+            imagePaths.push(imageName);
+            return; // 1ノードにつき1画像のみ
           }
         }
       }
-    }
-
-    // 線（strokes）の画像を処理
+      // 線（strokes）の画像を処理
       if ('strokes' in node && node.strokes && Array.isArray(node.strokes)) {
-      const strokes = node.strokes as Paint[];
-      for (const stroke of strokes) {
-        if (stroke.type === 'IMAGE' && stroke.imageHash) {
-          try {
-            const image = figma.getImageByHash(stroke.imageHash);
-            if (image) {
-              const imageBytes = await image.getBytesAsync();
-              const imageName = `img/image_${this.imageCounter}.png`;
-              const base64Data = this.arrayBufferToBase64(imageBytes);
-              images[imageName] = base64Data;
-              designNode.imageData = imageName;
-              this.imageCounter++;
-              console.log(`画像を処理しました: ${imageName} (ノード: ${node.name}, サイズ: ${imageBytes.byteLength} bytes)`);
+        const strokes = node.strokes as Paint[];
+        for (const stroke of strokes) {
+          if (stroke.type === 'IMAGE' && stroke.imageHash) {
+            let imageName: string;
+            if (this.imageHashToFileName[stroke.imageHash]) {
+              imageName = this.imageHashToFileName[stroke.imageHash];
+            } else {
+              imageName = `img/image_${this.imageCounter}.png`;
+              this.imageHashToFileName[stroke.imageHash] = imageName;
+              const image = figma.getImageByHash(stroke.imageHash);
+              if (image) {
+                const imageBytes = await image.getBytesAsync();
+                const base64Data = this.arrayBufferToBase64(imageBytes);
+                images[imageName] = base64Data;
+                // デバッグ: 画像保存時の情報を出力
+                console.log('[画像保存]', {
+                  imageHash: stroke.imageHash,
+                  imageName,
+                  nodeName: node.name,
+                  nodeId: node.id
+                });
+                this.imageCounter++;
+              }
             }
-          } catch (error) {
-            console.error(`画像の処理中にエラーが発生しました (ノード: ${node.name}):`, error);
+            designNode.imageData = imageName;
+            imagePaths.push(imageName);
+            return; // 1ノードにつき1画像のみ
           }
         }
       }
-    }
-
-    // 効果（effects）の画像を処理
-      if ('effects' in node && node.effects && Array.isArray(node.effects)) {
-      for (const effect of node.effects) {
-        if (effect.type === 'DROP_SHADOW' && effect.color) {
-          // ドロップシャドウの画像処理（必要に応じて）
-        }
-      }
-    }
-
-    // 背景（backgrounds）の画像を処理（フレーム用）
+      // 背景（backgrounds）の画像を処理（フレーム用）
       if ('backgrounds' in node && node.backgrounds && Array.isArray(node.backgrounds)) {
-      const backgrounds = node.backgrounds as Paint[];
-      for (const background of backgrounds) {
-        if (background.type === 'IMAGE' && background.imageHash) {
-          try {
-            const image = figma.getImageByHash(background.imageHash);
-            if (image) {
-              const imageBytes = await image.getBytesAsync();
-              const imageName = `img/image_${this.imageCounter}.png`;
-              const base64Data = this.arrayBufferToBase64(imageBytes);
-              images[imageName] = base64Data;
-              designNode.imageData = imageName;
-              this.imageCounter++;
-              console.log(`背景画像を処理しました: ${imageName} (ノード: ${node.name}, サイズ: ${imageBytes.byteLength} bytes)`);
+        const backgrounds = node.backgrounds as Paint[];
+        for (const background of backgrounds) {
+          if (background.type === 'IMAGE' && background.imageHash) {
+            let imageName: string;
+            if (this.imageHashToFileName[background.imageHash]) {
+              imageName = this.imageHashToFileName[background.imageHash];
+            } else {
+              imageName = `img/image_${this.imageCounter}.png`;
+              this.imageHashToFileName[background.imageHash] = imageName;
+              const image = figma.getImageByHash(background.imageHash);
+              if (image) {
+                const imageBytes = await image.getBytesAsync();
+                const base64Data = this.arrayBufferToBase64(imageBytes);
+                images[imageName] = base64Data;
+                // デバッグ: 画像保存時の情報を出力
+                console.log('[画像保存]', {
+                  imageHash: background.imageHash,
+                  imageName,
+                  nodeName: node.name,
+                  nodeId: node.id
+                });
+                this.imageCounter++;
+              }
             }
-          } catch (error) {
-            console.error(`背景画像の処理中にエラーが発生しました (ノード: ${node.name}):`, error);
+            designNode.imageData = imageName;
+            imagePaths.push(imageName);
+            return; // 1ノードにつき1画像のみ
           }
         }
-      }
       }
     } catch (error) {
-      console.error(`processNodeImagesでエラーが発生しました: ${node.name}`, error);
+      // 画像処理エラーは無視
     }
   }
 
@@ -316,59 +378,54 @@ class DesignExporter {
   // エクスポート実行
   async exportDesign(target: 'selected' | 'current-page'): Promise<DesignData> {
     try {
-      console.log('エクスポート開始:', target);
-      
-    let nodes: readonly SceneNode[] = [];
+      let nodes: readonly SceneNode[] = [];
 
-    if (target === 'selected') {
-      nodes = figma.currentPage.selection;
-      if (nodes.length === 0) {
-        throw new Error('エクスポート対象のノードが選択されていません');
+      if (target === 'selected') {
+        nodes = figma.currentPage.selection;
+        if (nodes.length === 0) {
+          throw new Error('エクスポート対象のノードが選択されていません');
+        }
+      } else {
+        nodes = figma.currentPage.children;
       }
-    } else {
-      nodes = figma.currentPage.children;
-    }
 
-      console.log(`処理対象ノード数: ${nodes.length}`);
+      this.imagesForExport = {}; // 画像マップを初期化
+      this.imageHashToFileName = {}; // マッピングも初期化
+      this.imageCounter = 0;
 
-    const designNodes: DesignNode[] = [];
-    const allImages: { [key: string]: string } = {};
-    let processedImageCount = 0;
-
+      const designNodes: DesignNode[] = [];
       for (let i = 0; i < nodes.length; i++) {
         const node = nodes[i];
-        try {
-          console.log(`ノード処理中 (${i + 1}/${nodes.length}): ${node.name} (${node.type})`);
-          
-      const { node: designNode, images } = await this.processImageNode(node);
-      designNodes.push(designNode);
-      
-      // 画像データを収集
-      const imageCount = Object.keys(images).length;
-      if (imageCount > 0) {
-        Object.assign(allImages, images);
-        processedImageCount += imageCount;
-        console.log(`ノード "${node.name}" から ${imageCount} 個の画像を処理しました`);
-          }
-        } catch (error) {
-          console.error(`ノード処理中にエラーが発生しました: ${node.name}`, error);
-          // エラーが発生しても処理を継続
+        const designNode = await this.serializeNode(node, 0, 'PAGE', 0, 0);
+        designNodes.push(designNode);
       }
-    }
 
-    console.log(`合計 ${processedImageCount} 個の画像を処理しました`);
-    console.log('画像ファイル一覧:', Object.keys(allImages));
-
+      // imagesに全画像データを含めて返す
       const result = {
-      version: '1.0.0',
-      nodes: designNodes,
-      images: allImages
-    };
+        version: '1.0.0',
+        nodes: designNodes,
+        images: this.imagesForExport
+      };
 
-      console.log('エクスポート完了');
+      // デバッグ: imageHashToFileNameマップの内容を出力
+      console.log('[imageHashToFileNameマップ]', this.imageHashToFileName);
+      // デバッグ: エクスポートjsonのimageData一覧を出力
+      const allImageData: string[] = [];
+      const collectImageData = (nodes: any[]) => {
+        for (const n of nodes) {
+          if (n.properties && n.properties.fills) {
+            for (const f of n.properties.fills) {
+              if (f.type === 'IMAGE') allImageData.push(f.imageData);
+            }
+          }
+          if (n.children) collectImageData(n.children);
+        }
+      };
+      collectImageData(designNodes);
+      console.log('エクスポートjsonのimageData一覧:', allImageData);
+
       return result;
     } catch (error) {
-      console.error('エクスポート処理中にエラーが発生しました:', error);
       throw error;
     }
   }
@@ -377,7 +434,8 @@ class DesignExporter {
 // インポート機能のクラス
 class DesignImporter {
   // デザインデータからノードを再作成
-  private async createNodeFromData(nodeData: DesignNode, imageMap: { [key: string]: string }): Promise<SceneNode> {
+  private async createNodeFromData(nodeData: DesignNode, imageMap: { [key: string]: string }, depth = 0, parentAbsX = 0, parentAbsY = 0): Promise<SceneNode> {
+    console.log('createNodeFromData START', { id: nodeData.id, name: nodeData.name, type: nodeData.type, depth });
     let node: SceneNode;
 
     switch (nodeData.type) {
@@ -415,51 +473,60 @@ class DesignImporter {
 
     // 基本プロパティを設定
     node.name = nodeData.name;
-    node.x = nodeData.x;
-    node.y = nodeData.y;
+    if (nodeData.type === 'GROUP') {
+      node.x = nodeData.x + parentAbsX;
+      node.y = nodeData.y + parentAbsY;
+    } else {
+      node.x = nodeData.x;
+      node.y = nodeData.y;
+    }
     node.resize(nodeData.width, nodeData.height);
 
     // ノード固有のプロパティを設定
     await this.applyNodeProperties(node, nodeData, imageMap);
 
+    // 画像を適用
+    await this.applyImageToNode(node, nodeData, imageMap);
+
     // 子ノードを再帰的に作成
     if (nodeData.children && nodeData.children.length > 0) {
+      console.log('createNodeFromData children', { id: nodeData.id, count: nodeData.children.length, depth });
       const childNodes: SceneNode[] = [];
       for (const childData of nodeData.children) {
-        const childNode = await this.createNodeFromData(childData, imageMap);
-        childNodes.push(childNode);
+        try {
+          console.log('createNodeFromData RECURSE ENTER', { parentId: nodeData.id, childId: childData.id, depth: depth + 1 });
+          let childNode;
+          if (nodeData.type === 'GROUP') {
+            // グループの子は相対→絶対
+            childNode = await this.createNodeFromData(childData, imageMap, depth + 1, node.x, node.y);
+          } else {
+            // それ以外は絶対座標のまま
+            childNode = await this.createNodeFromData(childData, imageMap, depth + 1, 0, 0);
+          }
+          childNodes.push(childNode);
+          console.log('createNodeFromData RECURSE EXIT', { parentId: nodeData.id, childId: childData.id, depth: depth + 1 });
+        } catch (e) {
+          console.error('createNodeFromData RECURSE ERROR', { parentId: nodeData.id, childId: childData.id, depth: depth + 1, error: e });
+        }
       }
-      
-      if (nodeData.type === 'GROUP') {
-        // グループの場合は、子ノードを作成後にグループを作成
-        const group = figma.group(childNodes, figma.currentPage);
-        group.name = nodeData.name;
-        group.x = nodeData.x;
-        group.y = nodeData.y;
-        group.resize(nodeData.width, nodeData.height);
-        return group;
-      } else if (node.type === 'FRAME') {
-        // フレームの場合は子ノードを追加
+      // GROUPもFRAME同様にappendChildで子ノードを追加
+      if (nodeData.type === 'GROUP' || node.type === 'FRAME') {
         const frame = node as FrameNode;
         for (const childNode of childNodes) {
           frame.appendChild(childNode);
         }
       }
     }
-
+    console.log('createNodeFromData END', { id: nodeData.id, name: nodeData.name, type: nodeData.type, depth });
     return node;
   }
 
   // 混合スタイルのテキストセグメントを適用
   private async applyStyledTextSegments(textNode: TextNode, styledSegments: any[]): Promise<void> {
-    console.log(`セグメント適用開始: ${styledSegments.length} セグメント`);
-    
     for (let i = 0; i < styledSegments.length; i++) {
       const segment = styledSegments[i];
       const start = segment.start;
       const end = segment.end;
-      
-      console.log(`セグメント ${i} を処理中: "${segment.characters}" (${start}-${end})`);
       
       try {
         // フォントを読み込む
@@ -467,15 +534,13 @@ class DesignImporter {
           try {
             await figma.loadFontAsync(segment.fontName);
             textNode.setRangeFontName(start, end, segment.fontName);
-            console.log(`フォントを適用: ${segment.fontName.family} ${segment.fontName.style}`);
           } catch (error) {
-            console.warn(`フォントの読み込みに失敗しました: ${segment.fontName}`, error);
             // デフォルトフォントでフォールバック
             try {
               await figma.loadFontAsync({ family: "Inter", style: "Regular" });
               textNode.setRangeFontName(start, end, { family: "Inter", style: "Regular" });
             } catch (fallbackError) {
-              console.error(`デフォルトフォントの読み込みにも失敗しました:`, fallbackError);
+              // デフォルトフォントの読み込みにも失敗した場合は何もしない
             }
           }
         }
@@ -483,35 +548,29 @@ class DesignImporter {
         // その他のスタイルを適用
         if (segment.fontSize) {
           textNode.setRangeFontSize(start, end, segment.fontSize);
-          console.log(`フォントサイズを適用: ${segment.fontSize}`);
         }
         
         if (segment.fills) {
           textNode.setRangeFills(start, end, segment.fills);
-          console.log(`塗り色を適用`);
         }
         
         if (segment.letterSpacing) {
           textNode.setRangeLetterSpacing(start, end, segment.letterSpacing);
-          console.log(`文字間隔を適用: ${segment.letterSpacing}`);
         }
         
         if (segment.lineHeight) {
           textNode.setRangeLineHeight(start, end, segment.lineHeight);
-          console.log(`行間を適用: ${segment.lineHeight}`);
         }
-        
-        console.log(`セグメント ${i} の処理が完了しました`);
       } catch (error) {
-        console.error(`セグメント ${i} の処理中にエラーが発生しました:`, error);
+        // セグメント処理エラーは無視
       }
     }
-    
-    console.log(`すべてのセグメントの処理が完了しました`);
   }
 
   // ノードのプロパティを適用
   private async applyNodeProperties(node: SceneNode, nodeData: DesignNode, imageMap: { [key: string]: string }): Promise<void> {
+    // デバッグ: ノード名・typeを出力
+    console.log('applyNodeProperties呼び出し:', node.name, node.type);
     if (!nodeData.properties) return;
 
     const props = nodeData.properties;
@@ -527,17 +586,14 @@ class DesignImporter {
           await figma.loadFontAsync(props.fontName);
           textNode.fontName = props.fontName;
           fontLoaded = true;
-          console.log(`フォントを読み込みました: ${props.fontName.family} ${props.fontName.style}`);
         } catch (error) {
-          console.warn(`フォントの読み込みに失敗しました: ${props.fontName}`, error);
           // フォント読み込みに失敗した場合はデフォルトフォントを使用
           try {
             await figma.loadFontAsync({ family: "Inter", style: "Regular" });
             textNode.fontName = { family: "Inter", style: "Regular" };
             fontLoaded = true;
-            console.log(`デフォルトフォントを読み込みました: Inter Regular`);
           } catch (fallbackError) {
-            console.error(`デフォルトフォントの読み込みにも失敗しました:`, fallbackError);
+            // デフォルトフォントの読み込みにも失敗した場合は何もしない
           }
         }
       } else {
@@ -546,9 +602,8 @@ class DesignImporter {
           await figma.loadFontAsync({ family: "Inter", style: "Regular" });
           textNode.fontName = { family: "Inter", style: "Regular" };
           fontLoaded = true;
-          console.log(`デフォルトフォントを読み込みました: Inter Regular`);
         } catch (error) {
-          console.error(`デフォルトフォントの読み込みに失敗しました:`, error);
+          // デフォルトフォントの読み込みに失敗した場合は何もしない
         }
       }
       
@@ -556,26 +611,24 @@ class DesignImporter {
       if (fontLoaded && props.characters) {
         try {
           textNode.characters = props.characters;
-          console.log(`テキストを設定しました: ${props.characters}`);
         } catch (error) {
-          console.error(`テキストの設定中にエラーが発生しました: ${props.characters}`, error);
+          // テキスト設定エラーは無視
         }
       }
       
       // 混合スタイルの処理
       if (props.styledSegments && Array.isArray(props.styledSegments)) {
-        console.log(`混合スタイルを復元中: ${props.styledSegments.length} セグメント`);
         await this.applyStyledTextSegments(textNode, props.styledSegments);
       } else {
         // 単一スタイルの処理（フォント読み込み後に実行）
         if (fontLoaded) {
-          if (props.fontSize && props.fontSize !== figma.mixed) {
-            try {
-              textNode.fontSize = props.fontSize;
-            } catch (error) {
-              console.error(`フォントサイズの設定中にエラーが発生しました:`, error);
-            }
+                  if (props.fontSize && props.fontSize !== figma.mixed) {
+          try {
+            textNode.fontSize = props.fontSize;
+          } catch (error) {
+            // フォントサイズ設定エラーは無視
           }
+        }
           
           if (props.fills && props.fills !== figma.mixed) {
             textNode.fills = props.fills;
@@ -612,7 +665,38 @@ class DesignImporter {
     if (node.type === 'RECTANGLE' || node.type === 'ELLIPSE' || 
         node.type === 'POLYGON' || node.type === 'STAR' || 
         node.type === 'VECTOR' || node.type === 'LINE') {
-      if (props.fills) node.fills = props.fills;
+      if (props.fills && Array.isArray(props.fills)) {
+        const newFills: Paint[] = [];
+        for (const fill of props.fills) {
+          if (fill.type === 'IMAGE') {
+            // デバッグ: fill.imageDataとimageMapの有無を出力
+            console.log('fill.imageData:', fill.imageData);
+            console.log('imageMap[fill.imageData]の有無:', !!imageMap[fill.imageData]);
+            if (fill.imageData && imageMap[fill.imageData]) {
+              // imageDataから画像を生成し、imageHashをセット
+              const imageBytes = this.base64ToUint8Array(imageMap[fill.imageData]);
+              // ログ出力
+              console.log('受信したUint8Array(先頭10個):', Array.from(imageBytes.slice(0, 10)));
+              const image = figma.createImage(imageBytes);
+              const { imageData, ...rest } = fill;
+              newFills.push({
+                ...rest,
+                imageHash: image.hash
+              } as ImagePaint);
+              // imageDataはDesignNode側のプロパティとして保持
+              if (!(node as any).imageData) {
+                (node as any).imageData = fill.imageData;
+              }
+            }
+            // imageDataやimageMapがなければpushしない
+          } else {
+            // 画像以外、またはimageDataがない場合はそのまま
+            const { imageData, ...rest } = fill;
+            newFills.push(rest);
+          }
+        }
+        node.fills = newFills;
+      }
       if (props.strokes) node.strokes = props.strokes;
       if (props.strokeWeight) node.strokeWeight = props.strokeWeight;
       if (props.cornerRadius && 'cornerRadius' in node) {
@@ -631,23 +715,68 @@ class DesignImporter {
       if (props.paddingBottom) frame.paddingBottom = props.paddingBottom;
       if (props.itemSpacing) frame.itemSpacing = props.itemSpacing;
     }
+  }
 
-    // 画像の処理
+  // 画像をノードに適用
+  private async applyImageToNode(node: SceneNode, nodeData: DesignNode, imageMap: { [key: string]: string }): Promise<void> {
+    // デバッグ: ノード名・typeを出力
+    console.log('applyImageToNode呼び出し:', node.name, node.type);
     if (nodeData.imageData && imageMap[nodeData.imageData]) {
       try {
         const imageBytes = this.base64ToUint8Array(imageMap[nodeData.imageData]);
+        // ログ出力
+        console.log('受信したUint8Array(先頭10個):', Array.from(imageBytes.slice(0, 10)));
         const image = figma.createImage(imageBytes);
         
-        if (node.type === 'RECTANGLE') {
-          const rect = node as RectangleNode;
-          rect.fills = [{
-            type: 'IMAGE',
-            imageHash: image.hash,
-            scaleMode: 'FILL'
-          }];
+        // 画像を適用できるノードタイプを拡張
+        if (node.type === 'RECTANGLE' || node.type === 'ELLIPSE' || 
+            node.type === 'POLYGON' || node.type === 'STAR' || 
+            node.type === 'VECTOR' || node.type === 'FRAME') {
+          // fillsプロパティを持つノードに画像を適用
+          if ('fills' in node) {
+            node.fills = [{
+              type: 'IMAGE',
+              imageHash: image.hash,
+              scaleMode: 'FILL'
+            } as ImagePaint];
+          }
         }
       } catch (error) {
-        console.error('画像の適用中にエラーが発生しました:', error);
+        // 画像適用エラーは無視
+      }
+    }
+
+    // fillsの各要素にimageDataがある場合の処理
+    if (nodeData.properties && nodeData.properties.fills && Array.isArray(nodeData.properties.fills)) {
+      try {
+        const newFills: Paint[] = [];
+        
+        for (const fill of nodeData.properties.fills) {
+          if (fill.type === 'IMAGE' && fill.imageData && imageMap[fill.imageData]) {
+            // 画像データをバイナリに変換してfigma.createImage()で画像を生成
+            const imageBytes = this.base64ToUint8Array(imageMap[fill.imageData]);
+            // ログ出力
+            console.log('受信したUint8Array(先頭10個):', Array.from(imageBytes.slice(0, 10)));
+            const image = figma.createImage(imageBytes);
+            
+            // imageHashをセットしてimageDataを削除
+            const { imageData, ...rest } = fill;
+            newFills.push({
+              ...rest,
+              imageHash: image.hash
+            } as ImagePaint);
+          } else {
+            // 画像以外のfillはそのまま
+            newFills.push(fill);
+          }
+        }
+        
+        // 新しいfillsをノードに適用
+        if ('fills' in node && newFills.length > 0) {
+          node.fills = newFills;
+        }
+      } catch (error) {
+        // 画像処理エラーは無視
       }
     }
   }
@@ -664,6 +793,8 @@ class DesignImporter {
 
   // インポート実行
   async importDesign(designData: DesignData, imageMap: { [key: string]: string }): Promise<void> {
+    // デバッグ: imageMapのキー一覧を出力
+    console.log('受信したimageMapのキー一覧:', Object.keys(imageMap));
     const createdNodes: SceneNode[] = [];
 
     for (const nodeData of designData.nodes) {
@@ -691,16 +822,12 @@ figma.showUI(__html__, { width: 400, height: 300 });
 
 figma.ui.onmessage = async (msg) => {
   try {
-    console.log('メッセージ受信:', msg.type);
-    
     switch (msg.type) {
       case 'export':
-        console.log('エクスポート開始:', msg.target);
         const designData = await exporter.exportDesign(msg.target);
         
         // 画像処理の結果を報告
         const imageCount = Object.keys(designData.images).length;
-        console.log('エクスポート成功, 画像数:', imageCount);
         figma.ui.postMessage({ 
           type: 'export-success', 
           data: designData,
@@ -709,20 +836,15 @@ figma.ui.onmessage = async (msg) => {
         break;
 
       case 'import':
-        console.log('インポート開始');
         await importer.importDesign(msg.designData, msg.imageMap);
-        console.log('インポート成功');
         figma.ui.postMessage({ type: 'import-success' });
         break;
 
       default:
         throw new Error(`未対応のメッセージタイプ: ${msg.type}`);
     }
-      } catch (error: any) {
-      console.error('メッセージ処理中にエラーが発生しました:', error);
-      console.error('エラーの詳細:', (error as Error).message, (error as Error).stack);
-      
-      const errorMessage = (error as Error).message || String(error);
+  } catch (error: any) {
+    const errorMessage = (error as Error).message || String(error);
     figma.ui.postMessage({ 
       type: msg.type === 'export' ? 'export-error' : 'import-error', 
       message: errorMessage 

@@ -11,7 +11,6 @@
     function initializeJSZip() {
       if (typeof JSZip !== 'undefined') {
         JSZipLoaded = true;
-        console.log('JSZipライブラリが読み込まれました');
         return Promise.resolve();
       }
       
@@ -21,11 +20,9 @@
         script.src = 'https://unpkg.com/jszip@3.10.1/dist/jszip.min.js';
         script.onload = () => {
           JSZipLoaded = true;
-          console.log('JSZipライブラリが読み込まれました（代替CDN）');
           resolve();
         };
         script.onerror = () => {
-          console.error('JSZipライブラリの読み込みに失敗しました');
           reject(new Error('JSZipライブラリの読み込みに失敗しました'));
         };
         document.head.appendChild(script);
@@ -34,7 +31,7 @@
     
     // 初期化を実行
     initializeJSZip().catch(error => {
-      console.error('JSZip初期化エラー:', error);
+      // JSZip初期化エラーは無視
     });
   </script>
   <style>
@@ -226,57 +223,108 @@
 
       try {
         // JSZipライブラリの読み込みを待つ
-        console.log('JSZipライブラリの読み込みを待機中...');
         await waitForJSZip();
-        console.log('JSZipライブラリが利用可能になりました');
 
         const reader = new FileReader();
         reader.onload = (e) => {
           const arrayBuffer = e.target.result;
-          console.log('ZIPファイルを読み込み中...');
           
           // JSZipでZIPファイルを読み込み
           JSZip.loadAsync(arrayBuffer).then((zipInstance) => {
-            console.log('ZIPファイルの読み込みが完了しました');
-            
             // design.jsonを読み込み
             const designJsonFile = zipInstance.file('design.json');
             if (!designJsonFile) {
               throw new Error('design.jsonファイルが見つかりません');
             }
-            console.log('design.jsonファイルを読み込み中...');
-            return designJsonFile.async('string');
-          }).then((jsonData) => {
-            console.log('design.jsonの解析中...');
-            const designData = JSON.parse(jsonData);
-            
-            // ZIPインスタンスを再取得して画像ファイルを読み込み
-            return JSZip.loadAsync(arrayBuffer).then((zipInstance) => {
+            return designJsonFile.async('string').then((jsonData) => {
+              const designData = JSON.parse(jsonData);
+              // designData.nodes配下のimageDataをすべて収集
+              const imagePaths = new Set();
+              function collectImagePaths(nodes, visited = new Set(), depth = 0) {
+                for (const node of nodes) {
+                  if (!node) continue;
+                  if (visited.has(node.id)) continue;
+                  visited.add(node.id);
+                  // デバッグ: 深さとノードIDを出力
+                  console.log('collectImagePaths depth:', depth, 'node.id:', node.id);
+                  // properties.fills内のimageDataも収集
+                  if (node.properties && node.properties.fills) {
+                    for (const fill of node.properties.fills) {
+                      if (fill.type === 'IMAGE' && fill.imageData) imagePaths.add(fill.imageData);
+                    }
+                  }
+                  if (node.children) collectImagePaths(node.children, visited, depth + 1);
+                }
+              }
+              // imagePaths収集時にvisitedを明示的に渡す + try-catchで例外を出力
+              try {
+                collectImagePaths(designData.nodes, new Set());
+              } catch (e) {
+                console.error('collectImagePathsで例外:', e);
+              }
+              // デバッグ: 収集したimagePathsを出力
+              console.log('collectImagePathsで収集したimagePaths:', Array.from(imagePaths));
+              // imagePathsの数・内容を出力
+              console.log('imagePaths.size:', imagePaths.size);
+              console.log('imagePaths:', Array.from(imagePaths));
+              // img/配下の画像ファイルをBase64化
               const imagePromises = [];
               const imageMap = {};
-              let imageCount = 0;
-              
-              zipInstance.forEach((relativePath, zipEntry) => {
-                if (relativePath.startsWith('img/') && !zipEntry.dir) {
-                  imageCount++;
-                  console.log(`画像ファイルを処理中: ${relativePath}`);
-                  const promise = zipEntry.async('base64').then((base64) => {
-                    imageMap[relativePath] = base64;
-                    console.log(`画像ファイルを処理完了: ${relativePath}`);
-                  });
-                  imagePromises.push(promise);
+              // --- 安全なBase64変換関数を追加 ---
+              function uint8ToBase64(uint8Array) {
+                return new Promise((resolve, reject) => {
+                  const blob = new Blob([uint8Array]);
+                  const reader = new FileReader();
+                  reader.onload = function (e) {
+                    // data:application/octet-stream;base64,xxxx
+                    const base64 = e.target.result.split(',')[1];
+                    resolve(base64);
+                  };
+                  reader.onerror = function (e) {
+                    reject(e);
+                  };
+                  reader.readAsDataURL(blob);
+                });
+              }
+              imagePaths.forEach((imagePath) => {
+                const zipEntry = zipInstance.file(imagePath);
+                // デバッグ: 各imagePathとzipEntryの有無を出力
+                console.log('imagePath:', imagePath, 'zipEntry exists:', !!zipEntry);
+                if (zipEntry) {
+                  try {
+                    const promise = zipEntry.async('uint8array').then((uint8Array) => {
+                      return uint8ToBase64(uint8Array).then((base64) => {
+                        imageMap[imagePath] = base64;
+                      }).catch((e) => {
+                        console.error('Base64変換エラー', imagePath, e);
+                      });
+                    });
+                    imagePromises.push(promise);
+                  } catch (e) {
+                    console.error('zipEntry.asyncエラー', imagePath, e);
+                  }
                 }
+                console.log('START AND');
               });
-
-              console.log(`合計 ${imageCount} 個の画像ファイルを処理します`);
-              return Promise.all(imagePromises).then(() => {
-                console.log('すべての画像ファイルの処理が完了しました');
-                return { designData, imageMap };
-              });
+              return Promise.all(imagePromises).then(() => ({ designData, imageMap }));
             });
           }).then((data) => {
-            console.log('Figmaプラグインにデータを送信中...');
+            // --- デバッグログ追加: importDesign呼び出し直前 ---
+            console.log('importDesign呼び出し直前');
+            console.log('designData.nodes.length:', data.designData.nodes ? data.designData.nodes.length : 'undefined');
+            try {
+              console.log('designData.nodes構造:', JSON.stringify(data.designData.nodes, null, 2));
+            } catch (e) {
+              console.error('designData.nodes stringify error:', e);
+            }
+            console.log('imageMap.keys.length:', data.imageMap ? Object.keys(data.imageMap).length : 'undefined');
+            try {
+              console.log('imageMap.keys:', Object.keys(data.imageMap));
+            } catch (e) {
+              console.error('imageMap.keys error:', e);
+            }
             // Figmaプラグインにデータを送信
+            console.log("START")
             parent.postMessage({ 
               pluginMessage: { 
                 type: 'import', 
@@ -284,13 +332,15 @@
                 imageMap: data.imageMap
               } 
             }, '*');
+            // fileInputの値をリセット
+            fileInput.value = '';
           }).catch((error) => {
-            console.error('ZIP処理エラー:', error);
             statusDiv.textContent = `エラー: ${error.message}`;
             statusDiv.className = 'error';
+            // fileInputの値をリセット（エラー時も）
+            fileInput.value = '';
           });
         };
-        
         reader.readAsArrayBuffer(file);
       } catch (error) {
         console.error('ファイル処理エラー:', error);
